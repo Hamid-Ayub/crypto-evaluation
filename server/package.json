@@ -1,0 +1,30 @@
+{
+  "name": "crypto-evaluation-backend",
+  "version": "1.0.0",
+  "description": "Decentralization Score Convex Backend - Evaluates crypto assets across multiple dimensions",
+  "private": true,
+  "scripts": {
+    "dev": "convex dev",
+    "deploy": "convex deploy",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "blockchain",
+    "decentralization",
+    "crypto",
+    "convex",
+    "scoring"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "convex": "^1.0.0",
+    "viem": "^2.0.0",
+    "cross-fetch": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  }
+}
+

@@ -1,0 +1,76 @@
+@import "tailwindcss";
+
+:root {
+  --color-bg-base: #030406;
+  --color-bg-surface: #06090f;
+  --color-bg-card: #0f141c;
+  --color-bg-card-alt: #151b25;
+  --color-border-subtle: #1c2433;
+  --color-border-strong: #262f41;
+  --color-text-primary: #f4f6fb;
+  --color-text-secondary: #9ea6bf;
+  --color-text-muted: #636b84;
+  --color-accent-green: #3fe081;
+  --color-accent-amber: #f7c548;
+  --color-accent-orange: #ff8a5c;
+  --color-accent-pink: #c784ff;
+  --color-pill-bg: rgba(255, 255, 255, 0.04);
+  --color-pill-border: rgba(255, 255, 255, 0.08);
+  --gradient-aurora: radial-gradient(circle at 20% 20%, rgba(79, 123, 255, 0.28), transparent 52%),
+    radial-gradient(circle at 80% 0%, rgba(66, 243, 172, 0.35), transparent 45%),
+    radial-gradient(circle at 50% 120%, rgba(255, 138, 92, 0.2), transparent 60%);
+  --shadow-card: 0 24px 68px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  --shadow-pill: 0 8px 24px rgba(0, 0, 0, 0.45);
+  --radius-card: 28px;
+  --radius-pill: 999px;
+}
+
+@theme inline {
+  --color-background: var(--color-bg-base);
+  --color-surface: var(--color-bg-surface);
+  --color-card: var(--color-bg-card);
+  --color-card-alt: var(--color-bg-card-alt);
+  --color-border: var(--color-border-subtle);
+  --color-text-strong: var(--color-text-primary);
+  --color-text-soft: var(--color-text-secondary);
+  --color-accent: var(--color-accent-green);
+  --color-amber: var(--color-accent-amber);
+  --color-pink: var(--color-accent-pink);
+  --font-sans: var(--font-geist-sans);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background-color: var(--color-bg-base);
+  background-image: linear-gradient(180deg, rgba(3, 4, 6, 0.95), rgba(3, 5, 9, 0.98)), var(--gradient-aurora);
+  background-attachment: fixed;
+  color: var(--color-text-primary);
+  font-family: var(--font-geist-sans), "Inter", system-ui, -apple-system, sans-serif;
+  letter-spacing: 0.01em;
+}
+
+::selection {
+  background-color: rgba(63, 224, 129, 0.35);
+  color: var(--color-text-primary);
+}
+
+.card-sheen {
+  position: relative;
+}
+
+.card-sheen::after {
+  content: "";
+  position: absolute;
+  inset: 1px;
+  border-radius: inherit;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.06), transparent 55%);
+  pointer-events: none;
+}
+

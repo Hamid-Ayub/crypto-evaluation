@@ -1,0 +1,3 @@
+# Token assets directory
+# Icons will be stored here: assets/tokens/{chainId}/{SYMBOL}_{address}.png
+

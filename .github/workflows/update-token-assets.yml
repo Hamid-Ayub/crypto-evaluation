@@ -1,0 +1,139 @@
+name: Update Token Assets
+
+on:
+  workflow_dispatch:
+    inputs:
+      chainId:
+        description: 'Chain ID (e.g., eip155:1)'
+        required: true
+        type: string
+      address:
+        description: 'Token address'
+        required: true
+        type: string
+      symbol:
+        description: 'Token symbol (optional, will be fetched if not provided)'
+        required: false
+        type: string
+  repository_dispatch:
+    types: [token-added]
+  schedule:
+    # Run daily at 2 AM UTC to update any missing assets
+    - cron: '0 2 * * *'
+
+jobs:
+  download-and-commit-assets:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read  # Only need read for private repo
+    
+    steps:
+      - name: Checkout private repository (for scripts)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: |
+          cd server
+          npm ci
+
+      - name: Download token assets
+        id: download-assets
+        env:
+          CHAIN_ID: ${{ github.event.inputs.chainId || github.event.client_payload.chainId }}
+          ADDRESS: ${{ github.event.inputs.address || github.event.client_payload.address }}
+          SYMBOL: ${{ github.event.inputs.symbol || github.event.client_payload.symbol || '' }}
+          PUBLIC_REPO: ${{ secrets.PUBLIC_ASSETS_REPO || 'Hamid-Ayub/blockchain-assets' }}
+          PUBLIC_BRANCH: ${{ secrets.PUBLIC_ASSETS_BRANCH || 'main' }}
+        run: |
+          cd server
+          node scripts/download-token-assets.js \
+            --chainId "$CHAIN_ID" \
+            --address "$ADDRESS" \
+            --symbol "$SYMBOL" \
+            --output-dir ../assets/tokens \
+            --public-repo "$PUBLIC_REPO" \
+            --public-branch "$PUBLIC_BRANCH" || echo "has-assets=false" >> $GITHUB_OUTPUT
+
+      - name: Setup Git for public repo
+        if: steps.download-assets.outputs.has-assets == 'true'
+        run: |
+          git config --global user.email "action@github.com"
+          git config --global user.name "GitHub Action"
+
+      - name: Setup SSH and checkout public assets repository
+        if: steps.download-assets.outputs.has-assets == 'true'
+        run: |
+          # Setup SSH
+          mkdir -p ~/.ssh
+          echo "${{ secrets.PUBLIC_ASSETS_DEPLOY_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+          eval "$(ssh-agent -s)"
+          ssh-add ~/.ssh/deploy_key
+          
+          # Configure git to use SSH
+          git config --global core.sshCommand "ssh -i ~/.ssh/deploy_key -F /dev/null"
+          
+          # Clone public repo
+          PUBLIC_REPO="${{ secrets.PUBLIC_ASSETS_REPO || 'Hamid-Ayub/blockchain-assets' }}"
+          PUBLIC_BRANCH="${{ secrets.PUBLIC_ASSETS_BRANCH || 'main' }}"
+          git clone "git@github.com:${PUBLIC_REPO}.git" public-assets -b "${PUBLIC_BRANCH}" || {
+            echo "Failed to clone, trying to init..."
+            mkdir -p public-assets
+            cd public-assets
+            git init
+            git remote add origin "git@github.com:${PUBLIC_REPO}.git"
+            git checkout -b "${PUBLIC_BRANCH}" || git checkout "${PUBLIC_BRANCH}" || true
+          }
+
+      - name: Copy assets to public repo
+        if: steps.download-assets.outputs.has-assets == 'true'
+        run: |
+          # Ensure directory structure exists
+          CHAIN_ID="${{ github.event.inputs.chainId || github.event.client_payload.chainId }}"
+          CHAIN_NUM=$(echo "$CHAIN_ID" | sed 's/eip155://')
+          ADDRESS="${{ github.event.inputs.address || github.event.client_payload.address }}"
+          NORMALIZED_ADDRESS=$(echo "$ADDRESS" | tr '[:upper:]' '[:lower:]' | sed 's/^0x//')
+          
+          # Copy token directory (address-based structure)
+          if [ -d "assets/tokens/$CHAIN_NUM/$NORMALIZED_ADDRESS" ]; then
+            mkdir -p "public-assets/tokens/$CHAIN_NUM"
+            cp -r "assets/tokens/$CHAIN_NUM/$NORMALIZED_ADDRESS" "public-assets/tokens/$CHAIN_NUM/" || true
+          fi
+
+      - name: Commit and push to public repo
+        if: steps.download-assets.outputs.has-assets == 'true'
+        working-directory: public-assets
+        run: |
+          git config user.email "action@github.com"
+          git config user.name "GitHub Action"
+          
+          git add tokens/
+          if ! git diff --staged --quiet; then
+            ADDRESS="${{ github.event.inputs.address || github.event.client_payload.address }}"
+            CHAIN_ID="${{ github.event.inputs.chainId || github.event.client_payload.chainId }}"
+            SYMBOL="${{ github.event.inputs.symbol || github.event.client_payload.symbol }}"
+            git commit -m "chore: add token assets [skip ci]
+
+Token: ${ADDRESS}
+Chain: ${CHAIN_ID}
+Symbol: ${SYMBOL}"
+            git push origin "${{ secrets.PUBLIC_ASSETS_BRANCH || 'main' }}"
+          else
+            echo "No changes to commit"
+          fi
+
+      - name: Output asset URLs
+        if: steps.download-assets.outputs.has-assets == 'true'
+        run: |
+          echo "✅ Asset downloaded and committed to public repo!"
+          echo "📦 GitHub CDN URL: ${{ steps.download-assets.outputs.asset-urls }}"
+          echo "📁 Local path: ${{ steps.download-assets.outputs.local-path }}"
+
