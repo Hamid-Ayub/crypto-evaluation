@@ -26,6 +26,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read  # Only need read for private repo
+      # Note: PAT token in PUBLIC_ASSETS_DEPLOY_KEY handles public repo write access
     
     steps:
       - name: Checkout private repository (for scripts)
@@ -67,31 +68,28 @@ jobs:
           git config --global user.email "action@github.com"
           git config --global user.name "GitHub Action"
 
-      - name: Setup SSH and checkout public assets repository
+      - name: Setup and checkout public assets repository
         if: steps.download-assets.outputs.has-assets == 'true'
         run: |
-          # Setup SSH
-          mkdir -p ~/.ssh
-          echo "${{ secrets.PUBLIC_ASSETS_DEPLOY_KEY }}" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan github.com >> ~/.ssh/known_hosts
-          eval "$(ssh-agent -s)"
-          ssh-add ~/.ssh/deploy_key
-          
-          # Configure git to use SSH
-          git config --global core.sshCommand "ssh -i ~/.ssh/deploy_key -F /dev/null"
-          
-          # Clone public repo
+          # Setup Git credentials using PAT
           PUBLIC_REPO="${{ secrets.PUBLIC_ASSETS_REPO || 'Hamid-Ayub/blockchain-assets' }}"
           PUBLIC_BRANCH="${{ secrets.PUBLIC_ASSETS_BRANCH || 'main' }}"
-          git clone "git@github.com:${PUBLIC_REPO}.git" public-assets -b "${PUBLIC_BRANCH}" || {
+          PAT_TOKEN="${{ secrets.PUBLIC_ASSETS_DEPLOY_KEY }}"
+          
+          # Clone public repo using HTTPS with PAT
+          # Format: https://TOKEN@github.com/OWNER/REPO.git
+          git clone "https://${PAT_TOKEN}@github.com/${PUBLIC_REPO}.git" public-assets -b "${PUBLIC_BRANCH}" || {
             echo "Failed to clone, trying to init..."
             mkdir -p public-assets
             cd public-assets
             git init
-            git remote add origin "git@github.com:${PUBLIC_REPO}.git"
+            git remote add origin "https://${PAT_TOKEN}@github.com/${PUBLIC_REPO}.git"
             git checkout -b "${PUBLIC_BRANCH}" || git checkout "${PUBLIC_BRANCH}" || true
           }
+          
+          # Configure git to use PAT for future operations
+          cd public-assets
+          git config remote.origin.url "https://${PAT_TOKEN}@github.com/${PUBLIC_REPO}.git"
 
       - name: Copy assets to public repo
         if: steps.download-assets.outputs.has-assets == 'true'
@@ -111,6 +109,8 @@ jobs:
       - name: Commit and push to public repo
         if: steps.download-assets.outputs.has-assets == 'true'
         working-directory: public-assets
+        env:
+          PAT_TOKEN: ${{ secrets.PUBLIC_ASSETS_DEPLOY_KEY }}
         run: |
           git config user.email "action@github.com"
           git config user.name "GitHub Action"
@@ -125,7 +125,10 @@ jobs:
 Token: ${ADDRESS}
 Chain: ${CHAIN_ID}
 Symbol: ${SYMBOL}"
-            git push origin "${{ secrets.PUBLIC_ASSETS_BRANCH || 'main' }}"
+            # Push using PAT token in URL
+            PUBLIC_REPO="${{ secrets.PUBLIC_ASSETS_REPO || 'Hamid-Ayub/blockchain-assets' }}"
+            PUBLIC_BRANCH="${{ secrets.PUBLIC_ASSETS_BRANCH || 'main' }}"
+            git push "https://${PAT_TOKEN}@github.com/${PUBLIC_REPO}.git" "${PUBLIC_BRANCH}"
           else
             echo "No changes to commit"
           fi

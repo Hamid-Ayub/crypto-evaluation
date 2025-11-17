@@ -15,13 +15,18 @@ const ETHPLORER_KEY = process.env.ETHPLORER_KEY || 'freekey';
 
 // Parse command line arguments
 const args = process.argv.slice(2);
-const chainId = args[args.indexOf('--chainId') + 1];
-const address = args[args.indexOf('--address') + 1];
-const symbol = args[args.indexOf('--symbol') + 1] || '';
-const outputDir = args[args.indexOf('--output-dir') + 1] || './assets/tokens';
+function getArg(name, defaultValue = null) {
+  const idx = args.indexOf(name);
+  return idx !== -1 && idx + 1 < args.length ? args[idx + 1] : defaultValue;
+}
+
+const chainId = getArg('--chainId');
+const address = getArg('--address');
+const symbol = getArg('--symbol', '');
+const outputDir = getArg('--output-dir', './assets/tokens');
 // Public repo for assets (separate from private code repo)
-const publicRepo = args[args.indexOf('--public-repo') + 1] || process.env.PUBLIC_ASSETS_REPO || 'Hamid-Ayub/blockchain-assets';
-const publicBranch = args[args.indexOf('--public-branch') + 1] || process.env.PUBLIC_ASSETS_BRANCH || 'main';
+const publicRepo = getArg('--public-repo') || process.env.PUBLIC_ASSETS_REPO || 'Hamid-Ayub/blockchain-assets';
+const publicBranch = getArg('--public-branch') || process.env.PUBLIC_ASSETS_BRANCH || 'main';
 
 if (!chainId || !address) {
   console.error('Usage: node download-token-assets.js --chainId <chainId> --address <address> [--symbol <symbol>] [--output-dir <dir>]');
@@ -119,6 +124,10 @@ async function main() {
     if (tokenInfo) {
       tokenSymbol = tokenInfo.symbol || symbol;
       iconUrl = tokenInfo.image;
+      // Ethplorer returns relative URLs, convert to absolute
+      if (iconUrl && iconUrl.startsWith('/')) {
+        iconUrl = `https://ethplorer.io${iconUrl}`;
+      }
     }
   }
 
