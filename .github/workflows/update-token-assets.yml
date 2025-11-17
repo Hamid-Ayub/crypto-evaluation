@@ -76,19 +76,28 @@ jobs:
           PUBLIC_BRANCH="${{ secrets.PUBLIC_ASSETS_BRANCH || 'main' }}"
           PAT_TOKEN="${{ secrets.PUBLIC_ASSETS_DEPLOY_KEY }}"
           
-          # Clone public repo using HTTPS with PAT
+          # Try to clone public repo using HTTPS with PAT
           # Format: https://TOKEN@github.com/OWNER/REPO.git
-          git clone "https://${PAT_TOKEN}@github.com/${PUBLIC_REPO}.git" public-assets -b "${PUBLIC_BRANCH}" || {
-            echo "Failed to clone, trying to init..."
+          if git clone "https://${PAT_TOKEN}@github.com/${PUBLIC_REPO}.git" public-assets -b "${PUBLIC_BRANCH}" 2>/dev/null; then
+            echo "✅ Cloned existing repository"
+            cd public-assets
+          else
+            echo "⚠️  Repository or branch not found, initializing new repo..."
             mkdir -p public-assets
             cd public-assets
             git init
-            git remote add origin "https://${PAT_TOKEN}@github.com/${PUBLIC_REPO}.git"
-            git checkout -b "${PUBLIC_BRANCH}" || git checkout "${PUBLIC_BRANCH}" || true
-          }
+            git config user.email "action@github.com"
+            git config user.name "GitHub Action"
+            git remote add origin "https://${PAT_TOKEN}@github.com/${PUBLIC_REPO}.git" || git remote set-url origin "https://${PAT_TOKEN}@github.com/${PUBLIC_REPO}.git"
+            # Create initial branch and commit
+            git checkout -b "${PUBLIC_BRANCH}" || git branch -M "${PUBLIC_BRANCH}"
+            mkdir -p tokens
+            echo "# Token Assets" > tokens/README.md
+            git add tokens/README.md
+            git commit -m "Initial commit: token assets directory" || true
+          fi
           
           # Configure git to use PAT for future operations
-          cd public-assets
           git config remote.origin.url "https://${PAT_TOKEN}@github.com/${PUBLIC_REPO}.git"
 
       - name: Copy assets to public repo
@@ -101,9 +110,13 @@ jobs:
           NORMALIZED_ADDRESS=$(echo "$ADDRESS" | tr '[:upper:]' '[:lower:]' | sed 's/^0x//')
           
           # Copy token directory (address-based structure)
+          # We're in the root directory, so paths are relative to that
           if [ -d "assets/tokens/$CHAIN_NUM/$NORMALIZED_ADDRESS" ]; then
             mkdir -p "public-assets/tokens/$CHAIN_NUM"
             cp -r "assets/tokens/$CHAIN_NUM/$NORMALIZED_ADDRESS" "public-assets/tokens/$CHAIN_NUM/" || true
+            echo "✅ Copied assets for $ADDRESS"
+          else
+            echo "⚠️  Assets directory not found: assets/tokens/$CHAIN_NUM/$NORMALIZED_ADDRESS"
           fi
 
       - name: Commit and push to public repo
