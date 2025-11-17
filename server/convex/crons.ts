@@ -15,5 +15,11 @@ crons.cron(
   internal.rateLimit.gc
 );
 
+crons.cron(
+  "sync-assets-to-github",
+  "*/15 * * * *",  // Every 15 minutes
+  internal.assetDownload.syncAssetsToGitHub
+);
+
 export default crons;
 

@@ -17,6 +17,7 @@ export default function HomePage() {
     category: "all",
     query: "",
     sort: "score",
+    sortDir: "desc",
     view: "table",
   });
   const [page, setPage] = useState(1);
@@ -36,6 +37,7 @@ export default function HomePage() {
           risk: filters.risk,
           query: filters.query,
           sort: filters.sort,
+          sortDir: filters.sortDir,
           page,
           pageSize: PAGE_SIZE,
         });
@@ -138,6 +140,12 @@ export default function HomePage() {
               pageSize={PAGE_SIZE}
               onPageChange={handlePageChange}
               view={filters.view}
+              sort={filters.sort}
+              sortDir={filters.sortDir}
+              onSortChange={(sort, sortDir) => {
+                setFilters({ ...filters, sort: sort as FilterState["sort"], sortDir });
+                setPage(1);
+              }}
             />
           )}
         </section>

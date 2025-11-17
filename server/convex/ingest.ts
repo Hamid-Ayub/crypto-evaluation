@@ -76,8 +76,25 @@ export const ingestAssetSnapshot = action({
       iconUrl: undefined,
     };
 
-    // Convert icon URL to GitHub CDN format
-    // Note: The actual file will be downloaded by GitHub Actions workflow
+    // Download and store asset icon in Convex file storage immediately
+    let iconStorageId: string | undefined;
+    let convexIconUrl: string | undefined;
+    
+    if (metadata.iconUrl || metadata.symbol) {
+      const assetResult = await ctx.runAction(internal.assetDownload.downloadAndStoreAsset, {
+        chainId,
+        address,
+        symbol: metadata.symbol,
+        iconUrl: metadata.iconUrl,
+      });
+      
+      if (assetResult) {
+        iconStorageId = assetResult.storageId;
+        convexIconUrl = assetResult.url;
+      }
+    }
+
+    // Generate GitHub CDN URL for backup (will be synced later)
     const githubIconUrl = toGitHubCdnUrl(
       metadata.iconUrl,
       chainId,
@@ -92,7 +109,8 @@ export const ingestAssetSnapshot = action({
       symbol: metadata.symbol, 
       name: metadata.name, 
       decimals: metadata.decimals, 
-      iconUrl: githubIconUrl, // Store GitHub CDN URL instead of Ethplorer URL
+      iconUrl: githubIconUrl, // GitHub CDN URL (backup, synced later)
+      iconStorageId, // Convex file storage ID (primary)
       status: "active",
     });
 

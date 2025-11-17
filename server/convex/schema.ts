@@ -19,7 +19,9 @@ export default defineSchema({
     symbol: v.optional(v.string()),
     name: v.optional(v.string()),
     decimals: v.optional(v.number()),
-    iconUrl: v.optional(v.string()),
+    iconUrl: v.optional(v.string()), // GitHub CDN URL (backup)
+    iconStorageId: v.optional(v.id("_storage")), // Convex file storage ID (primary)
+    githubSynced: v.optional(v.boolean()), // Whether asset has been synced to GitHub
     status: v.string(),
     createdAt: v.number(),
     updatedAt: v.number(),

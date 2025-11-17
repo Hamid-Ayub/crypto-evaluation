@@ -11,6 +11,7 @@
 import type * as _internal_math from "../_internal/math.js";
 import type * as _internal_normalize from "../_internal/normalize.js";
 import type * as _internal_scoring from "../_internal/scoring.js";
+import type * as assetDownload from "../assetDownload.js";
 import type * as assets from "../assets.js";
 import type * as assetsDownload from "../assetsDownload.js";
 import type * as auth from "../auth.js";
@@ -58,6 +59,7 @@ declare const fullApi: ApiFromModules<{
   "_internal/math": typeof _internal_math;
   "_internal/normalize": typeof _internal_normalize;
   "_internal/scoring": typeof _internal_scoring;
+  assetDownload: typeof assetDownload;
   assets: typeof assets;
   assetsDownload: typeof assetsDownload;
   auth: typeof auth;

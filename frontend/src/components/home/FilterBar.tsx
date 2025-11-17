@@ -6,7 +6,8 @@ export type FilterState = {
   risk: string;
   category: string;
   query: string;
-  sort: "score" | "liquidity" | "alphabetical";
+  sort: "score" | "liquidity" | "alphabetical" | "holders" | "volume" | "risk" | "updated";
+  sortDir: "asc" | "desc";
   view: "table" | "grid";
 };
 

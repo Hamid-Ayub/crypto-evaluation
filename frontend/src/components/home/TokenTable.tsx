@@ -8,6 +8,8 @@ import TokenAvatar from "@/components/shared/TokenAvatar";
 import { TokenRecord } from "@/types/token";
 import { formatUsd } from "@/lib/api";
 import {
+  ArrowDown,
+  ArrowUp,
   BarChart3,
   ChevronDown,
   ExternalLink,
@@ -26,6 +28,9 @@ type Props = {
   pageSize: number;
   onPageChange: (page: number) => void;
   view: ViewMode;
+  sort?: string;
+  sortDir?: "asc" | "desc";
+  onSortChange?: (sort: string, sortDir: "asc" | "desc") => void;
 };
 
 const riskMeta = {
@@ -57,6 +62,9 @@ export default function TokenTable({
   totalItems,
   view,
   pageSize,
+  sort,
+  sortDir,
+  onSortChange,
 }: Props) {
   const [expanded, setExpanded] = useState<string | null>(null);
 
@@ -75,6 +83,9 @@ export default function TokenTable({
           tokens={tokens}
           expanded={expanded}
           onToggle={toggle}
+          sort={sort}
+          sortDir={sortDir}
+          onSortChange={onSortChange}
         />
       )}
       <div className="flex flex-col gap-3 border-t border-white/5 px-4 py-3 text-xs text-[color:var(--color-text-secondary)] sm:flex-row sm:items-center sm:justify-between">
@@ -89,34 +100,121 @@ export default function TokenTable({
   );
 }
 
+type ColumnConfig = {
+  label: string;
+  sortKey: string | null;
+};
+
+const COLUMNS: ColumnConfig[] = [
+  { label: "Asset", sortKey: "alphabetical" },
+  { label: "Contract", sortKey: null },
+  { label: "Benchmark", sortKey: "score" },
+  { label: "Liquidity", sortKey: "liquidity" },
+  { label: "Holders", sortKey: "holders" },
+  { label: "24h volume", sortKey: "volume" },
+  { label: "Risk", sortKey: "risk" },
+  { label: "Updated", sortKey: "updated" },
+  { label: "", sortKey: null },
+];
+
+function SortableHeader({
+  label,
+  sortKey,
+  currentSort,
+  currentDir,
+  onSort,
+}: {
+  label: string;
+  sortKey: string | null;
+  currentSort?: string;
+  currentDir?: "asc" | "desc";
+  onSort?: (sort: string, sortDir: "asc" | "desc") => void;
+}) {
+  const isActive = sortKey && currentSort === sortKey;
+  const isAsc = isActive && currentDir === "asc";
+  const isDesc = isActive && currentDir === "desc";
+
+  const handleClick = () => {
+    if (!sortKey || !onSort) return;
+    
+    if (isActive) {
+      // Toggle direction
+      onSort(sortKey, isDesc ? "asc" : "desc");
+    } else {
+      // Set new sort with default direction
+      onSort(sortKey, "desc");
+    }
+  };
+
+  if (!sortKey) {
+    return (
+      <th className="border-b border-white/5 px-6 py-4">
+        {label}
+      </th>
+    );
+  }
+
+  return (
+    <th className="border-b border-white/5 px-6 py-4">
+      <button
+        onClick={handleClick}
+        className="flex items-center gap-2 hover:text-white transition-colors group"
+      >
+        <span>{label}</span>
+        <span className="flex flex-col">
+          <ArrowUp
+            className={`h-3 w-3 transition-opacity ${
+              isAsc
+                ? "opacity-100 text-white"
+                : isActive
+                ? "opacity-30"
+                : "opacity-20 group-hover:opacity-40"
+            }`}
+          />
+          <ArrowDown
+            className={`h-3 w-3 -mt-1 transition-opacity ${
+              isDesc
+                ? "opacity-100 text-white"
+                : isActive
+                ? "opacity-30"
+                : "opacity-20 group-hover:opacity-40"
+            }`}
+          />
+        </span>
+      </button>
+    </th>
+  );
+}
+
 function TokenTableView({
   tokens,
   expanded,
   onToggle,
+  sort,
+  sortDir,
+  onSortChange,
 }: {
   tokens: TokenRecord[];
   expanded: string | null;
   onToggle: (id: string) => void;
+  sort?: string;
+  sortDir?: "asc" | "desc";
+  onSortChange?: (sort: string, sortDir: "asc" | "desc") => void;
 }) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[1000px] border-separate border-spacing-0 text-sm">
         <thead>
           <tr className="text-left text-xs uppercase tracking-[0.35em] text-[color:var(--color-text-muted)]">
-            {[
-              "Asset",
-              "Contract",
-              "Benchmark",
-              "Liquidity",
-              "Holders",
-              "24h volume",
-              "Risk",
-              "Updated",
-              "",
-            ].map((column) => (
-              <th key={column} className="border-b border-white/5 px-6 py-4">
-                {column}
-              </th>
+            {COLUMNS.map((column) => (
+              <SortableHeader
+                key={column.label}
+                label={column.label}
+                sortKey={column.sortKey}
+                currentSort={sort}
+                currentDir={sortDir}
+                onSort={onSortChange}
+              />
             ))}
           </tr>
         </thead>
@@ -209,79 +307,118 @@ function RiskBadge({ level }: { level: TokenRecord["risk"] }) {
 }
 
 function ExpandedRow({ token }: { token: TokenRecord }) {
+  const isWellDecentralized = token.benchmarkDetails.nakamoto >= 4 && token.benchmarkDetails.gini < 0.5;
+  const hasConcentrationRisk = token.benchmarkDetails.hhi >= 1500 || token.benchmarkDetails.nakamoto < 4;
+  
+  const insights = [
+    {
+      label: "Decentralization Status",
+      value: isWellDecentralized ? "Well Decentralized" : hasConcentrationRisk ? "Centralization Risk" : "Moderate",
+      color: isWellDecentralized ? "#3fe081" : hasConcentrationRisk ? "#ff8a5c" : "#f7c548",
+      detail: token.benchmarkDetails.nakamoto >= 4 
+        ? `${token.benchmarkDetails.nakamoto} entities needed for majority control`
+        : `Only ${token.benchmarkDetails.nakamoto} entities control majority`,
+    },
+    {
+      label: "Ownership Distribution",
+      value: token.benchmarkDetails.gini < 0.5 ? "Distributed" : "Concentrated",
+      color: token.benchmarkDetails.gini < 0.5 ? "#3fe081" : "#ff8a5c",
+      detail: `Gini ${token.benchmarkDetails.gini.toFixed(3)} • ${token.holders.toLocaleString()} holders`,
+    },
+    {
+      label: "Liquidity Quality",
+      value: token.benchmarkDetails.liquidity >= 70 ? "Strong" : token.benchmarkDetails.liquidity >= 50 ? "Moderate" : "Weak",
+      color: token.benchmarkDetails.liquidity >= 70 ? "#3fe081" : token.benchmarkDetails.liquidity >= 50 ? "#f7c548" : "#ff8a5c",
+      detail: `Score: ${token.benchmarkDetails.liquidity}/100 • ${formatUsd(token.liquidityUsd, { notation: "compact" })} depth`,
+    },
+  ];
+
   return (
-    <div className="flex flex-col gap-4 lg:flex-row">
-      <div className="flex-1 space-y-4">
-        <div className="flex flex-wrap items-center gap-3">
-          <TokenAvatar avatar={token.avatar} symbol={token.symbol} />
-          <div>
-            <p className="text-lg font-semibold text-white">
-              {token.name} <span className="text-sm text-[color:var(--color-text-muted)]">({token.symbol})</span>
-            </p>
-            <p className="text-xs uppercase tracking-[0.35em] text-[color:var(--color-text-muted)]">
-              {token.chainLabel} • {token.category}
-            </p>
-          </div>
-        </div>
-        <p className="text-sm text-[color:var(--color-text-secondary)]">
-          {token.summary}
-        </p>
-        <div className="flex flex-wrap gap-2 text-xs text-[color:var(--color-text-secondary)]">
-          {token.tags.map((tag) => (
-            <span
-              key={tag}
-              className="rounded-full border border-white/10 bg-white/[0.02] px-3 py-1"
-            >
-              {tag}
-            </span>
-          ))}
-        </div>
-        <Link
-          href={`/tokens/${token.id}`}
-          className="flex w-fit items-center gap-2 rounded-full border border-white/15 px-4 py-2 text-xs font-semibold text-white transition hover:border-white/40"
-        >
-          Open detailed page
-          <ExternalLink className="h-4 w-4" />
-        </Link>
-      </div>
-      <div className="flex flex-1 flex-col gap-4 rounded-2xl border border-white/5 bg-black/20 p-4">
-        <div className="flex items-center justify-between">
-          <p className="text-xs uppercase tracking-[0.35em] text-[color:var(--color-text-muted)]">
-            Signal trail
+    <div className="flex flex-col gap-4">
+      {/* Compact Stats Grid */}
+      <div className="grid grid-cols-4 gap-2">
+        <div className="rounded-lg border border-white/5 bg-white/[0.02] p-2">
+          <p className="text-[9px] uppercase tracking-[0.35em] text-[color:var(--color-text-muted)] mb-0.5">
+            Ownership
           </p>
-          <BarChart3 className="h-4 w-4 text-[#8ee3ff]" />
+          <p className="text-lg font-bold text-white">{token.benchmarkDetails.ownership}</p>
         </div>
-        <Sparkline data={token.sparkline} />
-        <div className="grid gap-3 sm:grid-cols-3">
-          {token.stats.map((stat) => (
-            <div
-              key={stat.label}
-              className="rounded-2xl border border-white/5 bg-white/[0.02] p-3 text-xs text-[color:var(--color-text-secondary)]"
-            >
-              <p className="uppercase tracking-[0.35em]">{stat.label}</p>
-              <p className="mt-2 text-lg font-semibold text-white">{stat.value}</p>
-              <p
-                className={`text-[11px] ${
-                  stat.delta >= 0 ? "text-[#3fe081]" : "text-[#ff8a5c]"
-                }`}
-              >
-                {stat.delta >= 0 ? "+" : ""}
-                {stat.delta}%
-              </p>
+        <div className="rounded-lg border border-white/5 bg-white/[0.02] p-2">
+          <p className="text-[9px] uppercase tracking-[0.35em] text-[color:var(--color-text-muted)] mb-0.5">
+            Control Risk
+          </p>
+          <p className="text-lg font-bold text-white">{token.benchmarkDetails.controlRisk}</p>
+        </div>
+        <div className="rounded-lg border border-white/5 bg-white/[0.02] p-2">
+          <p className="text-[9px] uppercase tracking-[0.35em] text-[color:var(--color-text-muted)] mb-0.5">
+            Liquidity
+          </p>
+          <p className="text-lg font-bold text-white">{token.benchmarkDetails.liquidity}</p>
+        </div>
+        <div className="rounded-lg border border-white/5 bg-white/[0.02] p-2">
+          <p className="text-[9px] uppercase tracking-[0.35em] text-[color:var(--color-text-muted)] mb-0.5">
+            Governance
+          </p>
+          <p className="text-lg font-bold text-white">{token.benchmarkDetails.governance}</p>
+        </div>
+      </div>
+
+      {/* Key Metrics Row */}
+      <div className="grid grid-cols-3 gap-2">
+        <div className="rounded-lg border border-white/5 bg-white/[0.02] p-2">
+          <p className="text-[9px] uppercase tracking-[0.35em] text-[color:var(--color-text-muted)] mb-0.5">
+            Gini
+          </p>
+          <p className="text-base font-bold text-white">{token.benchmarkDetails.gini.toFixed(3)}</p>
+        </div>
+        <div className="rounded-lg border border-white/5 bg-white/[0.02] p-2">
+          <p className="text-[9px] uppercase tracking-[0.35em] text-[color:var(--color-text-muted)] mb-0.5">
+            HHI
+          </p>
+          <p className="text-base font-bold text-white">{token.benchmarkDetails.hhi.toFixed(0)}</p>
+        </div>
+        <div className="rounded-lg border border-white/5 bg-white/[0.02] p-2">
+          <p className="text-[9px] uppercase tracking-[0.35em] text-[color:var(--color-text-muted)] mb-0.5">
+            Nakamoto
+          </p>
+          <p className="text-base font-bold text-white">{token.benchmarkDetails.nakamoto}</p>
+        </div>
+      </div>
+
+      {/* Decentralization Insights */}
+      <div className="rounded-lg border border-white/5 bg-black/20 p-3">
+        <div className="flex items-center justify-between mb-2">
+          <p className="text-[10px] uppercase tracking-[0.35em] text-[color:var(--color-text-muted)]">
+            Decentralization Assessment
+          </p>
+          <Link
+            href={`/tokens/${encodeURIComponent(token.id)}`}
+            className="text-[10px] text-[#8ee3ff] hover:text-[#8ee3ff]/80 transition flex items-center gap-1"
+          >
+            Full report
+            <ExternalLink className="h-3 w-3" />
+          </Link>
+        </div>
+        <div className="space-y-2">
+          {insights.map((insight, idx) => (
+            <div key={idx} className="flex items-start gap-2">
+              <div 
+                className="h-1.5 w-1.5 rounded-full mt-1.5 flex-shrink-0" 
+                style={{ backgroundColor: insight.color }}
+              />
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 mb-0.5">
+                  <p className="text-xs font-semibold text-white">{insight.value}</p>
+                  <p className="text-[9px] uppercase tracking-[0.35em] text-[color:var(--color-text-muted)]">
+                    {insight.label}
+                  </p>
+                </div>
+                <p className="text-[10px] text-[color:var(--color-text-secondary)] leading-tight">
+                  {insight.detail}
+                </p>
+              </div>
             </div>
           ))}
-        </div>
-        <div className="rounded-2xl border border-dashed border-white/20 p-4 text-sm text-[color:var(--color-text-secondary)]">
-          <p className="text-xs uppercase tracking-[0.35em] font-semibold">
-            Benchmark commitment
-          </p>
-          <p className="mt-2">
-            Attach governance docs, audits, and L2 proofs to elevate this listing.
-          </p>
-          <button className="mt-3 inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-[#f7c548] to-[#ff8a5c] px-4 py-2 text-xs font-semibold text-black transition hover:brightness-110">
-            Push to diligence flow
-            <Sparkles className="h-4 w-4" />
-          </button>
         </div>
       </div>
     </div>
@@ -401,7 +538,7 @@ function TokenGrid({ tokens }: { tokens: TokenRecord[] }) {
             <Sparkline data={token.sparkline} />
           </div>
           <Link
-            href={`/tokens/${token.id}`}
+            href={`/tokens/${encodeURIComponent(token.id)}`}
             className="mt-5 flex w-full items-center justify-center gap-2 rounded-full border border-white/15 px-4 py-2 text-xs font-semibold text-white transition hover:border-white/40"
           >
             Launch benchmark brief

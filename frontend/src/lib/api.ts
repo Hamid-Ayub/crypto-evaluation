@@ -20,7 +20,8 @@ export type TokenListParams = {
   category?: string;
   risk?: string;
   query?: string;
-  sort?: "score" | "liquidity" | "alphabetical";
+  sort?: "score" | "liquidity" | "alphabetical" | "holders" | "volume" | "risk" | "updated";
+  sortDir?: "asc" | "desc";
   page?: number;
   pageSize?: number;
 };
@@ -48,6 +49,7 @@ const API_BASE =
 
 export async function fetchScore(
   payload: ScoreLookupPayload,
+  options?: { autoQueue?: boolean },
 ): Promise<ScoreLookupResult> {
   const url = new URL(`${API_BASE}/api/score`);
   url.searchParams.set("chainId", payload.chainId);
@@ -55,6 +57,22 @@ export async function fetchScore(
 
   const response = await fetch(url.toString(), { cache: "no-store" });
   if (!response.ok) {
+    // If asset not found and autoQueue is enabled, automatically queue it for fetching
+    if (response.status === 404 && options?.autoQueue !== false) {
+      try {
+        await requestRefresh(payload.chainId, payload.address);
+        // Return a pending result indicating the asset has been queued
+        return {
+          chainId: payload.chainId,
+          address: payload.address,
+          totalScore: undefined,
+          subScores: undefined,
+        };
+      } catch (refreshError) {
+        // If queueing fails, still throw the original error
+        throw new Error("Asset not found in the scoring index. Failed to queue for fetching.");
+      }
+    }
     const message =
       response.status === 404
         ? "Asset not found in the scoring index."
@@ -84,7 +102,10 @@ export async function fetchTokens(params: TokenListParams = {}): Promise<TokenLi
   if (params.category && params.category !== "all") url.searchParams.set("category", params.category);
   if (params.risk && params.risk !== "all") url.searchParams.set("risk", params.risk);
   if (params.query) url.searchParams.set("query", params.query);
-  if (params.sort) url.searchParams.set("sort", params.sort);
+  if (params.sort) {
+    const sortValue = params.sortDir ? `${params.sort}:${params.sortDir}` : params.sort;
+    url.searchParams.set("sort", sortValue);
+  }
   if (params.page) url.searchParams.set("page", params.page.toString());
   if (params.pageSize) url.searchParams.set("pageSize", params.pageSize.toString());
 
@@ -117,7 +138,8 @@ export async function requestRefresh(chainId: string, address: string): Promise<
   });
 
   if (!response.ok) {
-    throw new Error(`Failed to request refresh: ${response.statusText}`);
+    const errorData = await response.json().catch(() => ({ error: response.statusText }));
+    throw new Error(errorData.error || `Failed to request refresh: ${response.statusText}`);
   }
 
   return await response.json();

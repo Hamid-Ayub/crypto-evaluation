@@ -17,11 +17,22 @@ export default function RefreshButton({ chainId, address }: Props) {
     try {
       setLoading(true);
       setMessage(null);
+      
+      if (!chainId || !address) {
+        setMessage("Missing chain ID or address");
+        setTimeout(() => setMessage(null), 5000);
+        return;
+      }
+      
       await requestRefresh(chainId, address);
       setMessage("Refresh queued successfully");
       setTimeout(() => setMessage(null), 3000);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Failed to queue refresh");
+      console.error("Refresh error:", error);
+      const errorMessage = error instanceof Error 
+        ? error.message 
+        : "Failed to queue refresh";
+      setMessage(errorMessage);
       setTimeout(() => setMessage(null), 5000);
     } finally {
       setLoading(false);

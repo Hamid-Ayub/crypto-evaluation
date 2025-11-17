@@ -55,8 +55,25 @@ router.route({
   handler: httpAction(async (ctx, req) => {
     const url = new URL(req.url);
     const id = url.searchParams.get("id");
-    if (!id) return new Response("Missing id", { status: 400 });
-    const token = await ctx.runQuery(api.assets.getEnriched, { tokenId: id });
+    const address = url.searchParams.get("address");
+    const chainId = url.searchParams.get("chainId");
+    
+    // Support both id (CAIP-19 or address) and address+chainId params
+    let tokenId: string | null = null;
+    if (id) {
+      tokenId = id;
+    } else if (address) {
+      // If address provided, construct tokenId
+      if (chainId) {
+        tokenId = `${chainId}:erc20:${address}`;
+      } else {
+        tokenId = address; // Address-only, will search across chains
+      }
+    }
+    
+    if (!tokenId) return new Response("Missing id or address", { status: 400 });
+    
+    const token = await ctx.runQuery(api.assets.getEnriched, { tokenId });
     if (!token) return new Response("Not found", { status: 404 });
     return new Response(JSON.stringify(token), {
       status: 200,
@@ -69,21 +86,67 @@ router.route({
   path: "/api/refresh",
   method: "POST",
   handler: httpAction(async (ctx, req) => {
-    const ip = req.headers.get("x-forwarded-for") ?? "anon";
-    const rate = await ctx.runMutation(api.rateLimit.checkAndIncrement, { key: `ip:${ip}`, plan: "free" });
-    if (!rate.ok) return new Response("Too many requests", { status: 429 });
+    try {
+      const ip = req.headers.get("x-forwarded-for") ?? "anon";
+      const rate = await ctx.runMutation(api.rateLimit.checkAndIncrement, { key: `ip:${ip}`, plan: "free" });
+      if (!rate.ok) {
+        return new Response(JSON.stringify({ error: "Too many requests" }), { 
+          status: 429, 
+          headers: { "content-type": "application/json" } 
+        });
+      }
 
-    const body = await req.json();
-    const { chainId, address } = body || {};
-    if (!chainId || !address) return new Response("Bad request", { status: 400 });
+      const body = await req.json();
+      const { chainId, address } = body || {};
+      if (!chainId || !address) {
+        return new Response(JSON.stringify({ error: "Missing chainId or address" }), { 
+          status: 400, 
+          headers: { "content-type": "application/json" } 
+        });
+      }
 
-    let asset = await ctx.runQuery(api.assets.getByChainAddress, { chainId, address });
-    if (!asset) {
-      const id = await ctx.runMutation(internal.assets.ensureAsset, { chainId, address, standard: "erc20", status: "pending" });
-      asset = await ctx.runQuery(api.assets.getAssetInternal, { assetId: id });
+      // Normalize address
+      const normalizedAddress = address.toLowerCase().trim();
+      
+      let asset = await ctx.runQuery(api.assets.getByChainAddress, { 
+        chainId: chainId.trim(), 
+        address: normalizedAddress 
+      });
+      
+      if (!asset) {
+        // Create asset if it doesn't exist
+        const assetId = await ctx.runMutation(internal.assets.ensureAsset, { 
+          chainId: chainId.trim(), 
+          address: normalizedAddress, 
+          standard: "erc20", 
+          status: "pending" 
+        });
+        asset = await ctx.runQuery(api.assets.getAssetInternal, { assetId });
+        
+        if (!asset) {
+          return new Response(JSON.stringify({ error: "Failed to create asset" }), { 
+            status: 500, 
+            headers: { "content-type": "application/json" } 
+          });
+        }
+      }
+      
+      // Queue refresh job
+      await ctx.runMutation(api.assets.requestRefresh, { assetId: asset._id });
+      
+      return new Response(JSON.stringify({ enqueued: true }), { 
+        status: 200, 
+        headers: { "content-type": "application/json" } 
+      });
+    } catch (error) {
+      console.error("Error in /api/refresh:", error);
+      return new Response(JSON.stringify({ 
+        error: error instanceof Error ? error.message : "Internal server error" 
+      }), { 
+        status: 500, 
+        headers: { "content-type": "application/json" } 
+      });
     }
-    await ctx.runMutation(api.assets.requestRefresh, { assetId: asset!._id });
-    return new Response(JSON.stringify({ enqueued: true }), { status: 200, headers: { "content-type": "application/json" } });
   }),
 });
 
@@ -195,33 +258,8 @@ router.route({
       decimals,
     });
 
-    // Trigger GitHub Actions workflow to download and store token assets
-    // This runs asynchronously and doesn't block the response
-    // Note: This triggers the workflow in the PRIVATE repo, which then pushes to PUBLIC assets repo
-    if (process.env.GITHUB_TOKEN && process.env.PRIVATE_CODE_REPO) {
-      const PRIVATE_CODE_REPO = process.env.PRIVATE_CODE_REPO; // Private repo where workflow runs
-      const [owner, repo] = PRIVATE_CODE_REPO.split("/");
-      
-      fetch(`https://api.github.com/repos/${owner}/${repo}/dispatches`, {
-        method: "POST",
-        headers: {
-          Authorization: `token ${process.env.GITHUB_TOKEN}`,
-          Accept: "application/vnd.github.v3+json",
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          event_type: "token-added",
-          client_payload: {
-            chainId,
-            address,
-            symbol: symbol || result.assetId, // Use symbol if available
-          },
-        }),
-      }).catch((err) => {
-        // Log but don't fail - asset download is non-critical
-        console.warn("Failed to trigger asset download workflow:", err);
-      });
-    }
+    // Note: GitHub workflow trigger removed - assets are now downloaded directly to Convex
+    // and synced to GitHub via scheduled cron every 15 minutes
 
     return new Response(JSON.stringify({ ok: true, assetId, ...result }), { status: 200, headers: { "content-type": "application/json" } });
   }),

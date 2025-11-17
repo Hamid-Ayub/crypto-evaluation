@@ -1,6 +1,6 @@
 import { v } from "convex/values";
 import type { Doc } from "./_generated/dataModel";
-import { action, internalAction, internalMutation, mutation, query } from "./_generated/server";
+import { action, internalAction, internalMutation, internalQuery, mutation, query } from "./_generated/server";
 import { api, internal } from "./_generated/api";
 import { caip19 } from "./_internal/normalize";
 import { APP, SCORE_WEIGHTS, CALC_VERSION } from "./config";
@@ -9,7 +9,8 @@ import { clamp } from "./_internal/math";
 
 type RiskLevel = "low" | "medium" | "high";
 type TokenCategory = "defi" | "l2" | "infrastructure" | "gaming" | "stablecoin";
-type SortOption = "score" | "liquidity" | "alphabetical";
+type SortOption = "score" | "liquidity" | "alphabetical" | "holders" | "volume" | "risk" | "updated";
+type SortDirection = "asc" | "desc";
 
 export type TokenView = {
   id: string;
@@ -71,6 +72,7 @@ type NormalizedFilters = {
   risk: RiskLevel | "all";
   query: string;
   sort: SortOption;
+  sortDir: SortDirection;
   page: number;
   pageSize: number;
 };
@@ -79,7 +81,7 @@ const DEFAULT_PAGE_SIZE = 10;
 const MIN_PAGE_SIZE = 5;
 const MAX_PAGE_SIZE = 50;
 const SORT_DEFAULT: SortOption = "score";
-const SORT_OPTIONS: SortOption[] = ["score", "liquidity", "alphabetical"];
+const SORT_OPTIONS: SortOption[] = ["score", "liquidity", "alphabetical", "holders", "volume", "risk", "updated"];
 const RISK_OPTIONS: RiskLevel[] = ["low", "medium", "high"];
 
 const CHAIN_INFO: Record<string, { label: string; short: string; defaultCategory: TokenCategory }> = {
@@ -138,7 +140,7 @@ export const listEnriched = query({
     ).filter((token): token is TokenView => Boolean(token));
 
     const filtered = tokens.filter((token) => matchesFilters(token, filters));
-    const sorted = sortTokens(filtered, filters.sort);
+    const sorted = sortTokens(filtered, filters.sort, filters.sortDir);
     const { page, pageSize } = filters;
 
     const totalItems = sorted.length;
@@ -162,13 +164,40 @@ export const getEnriched = query({
     const parsed = parseTokenId(tokenId);
     if (!parsed) return null;
 
-    const asset = await ctx.db
-      .query("assets")
-      .withIndex("by_chain_address", (q2) => q2.eq("chainId", parsed.chainId).eq("address", parsed.address))
-      .unique();
+    // If chainId is provided, search directly
+    if (parsed.chainId) {
+      const asset = await ctx.db
+        .query("assets")
+        .withIndex("by_chain_address", (q2) => q2.eq("chainId", parsed.chainId).eq("address", parsed.address))
+        .unique();
+      if (!asset) return null;
+      return await buildTokenView(ctx, asset);
+    }
 
-    if (!asset) return null;
-    return await buildTokenView(ctx, asset);
+    // If only address provided, search across all chains (prefer Ethereum first)
+    const address = parsed.address;
+    const preferredChains = ["eip155:1", "eip155:42161", "eip155:8453", "eip155:137", "eip155:10", "eip155:43114"];
+    
+    // Try preferred chains first
+    for (const chainId of preferredChains) {
+      const asset = await ctx.db
+        .query("assets")
+        .withIndex("by_chain_address", (q2) => q2.eq("chainId", chainId).eq("address", address))
+        .unique();
+      if (asset) {
+        return await buildTokenView(ctx, asset);
+      }
+    }
+    
+    // Fallback: search all chains
+    const cursor = ctx.db.query("assets");
+    for await (const asset of cursor) {
+      if (asset.address.toLowerCase() === address) {
+        return await buildTokenView(ctx, asset);
+      }
+    }
+    
+    return null;
   },
 });
 
@@ -178,12 +207,18 @@ function normalizeFilters(args: TokenListArgs): NormalizedFilters {
   const requestedRisk = (args.risk ?? "").toLowerCase() as RiskLevel;
   const risk = RISK_OPTIONS.includes(requestedRisk) ? requestedRisk : "all";
   const queryText = (args.query ?? "").trim().toLowerCase();
-  const sortCandidate = (args.sort ?? "").toLowerCase() as SortOption;
+  
+  // Parse sort and direction (format: "score:desc" or just "score")
+  const sortInput = (args.sort ?? "").toLowerCase();
+  const [sortPart, dirPart] = sortInput.split(":");
+  const sortCandidate = sortPart as SortOption;
   const sort = SORT_OPTIONS.includes(sortCandidate) ? sortCandidate : SORT_DEFAULT;
+  const sortDir: SortDirection = dirPart === "asc" || dirPart === "desc" ? dirPart : "desc";
+  
   const page = Math.max(1, args.page ?? 1);
   const pageSize = clamp(args.pageSize ?? DEFAULT_PAGE_SIZE, MIN_PAGE_SIZE, MAX_PAGE_SIZE);
 
-  return { chain, category, risk, query: queryText, sort, page, pageSize };
+  return { chain, category, risk, query: queryText, sort, sortDir, page, pageSize };
 }
 
 function matchesFilters(token: TokenView, filters: NormalizedFilters) {
@@ -209,16 +244,34 @@ function matchesFilters(token: TokenView, filters: NormalizedFilters) {
   return true;
 }
 
-function sortTokens(tokens: TokenView[], sort: SortOption) {
+function sortTokens(tokens: TokenView[], sort: SortOption, direction: SortDirection = "desc") {
   const list = [...tokens];
+  const multiplier = direction === "asc" ? -1 : 1;
+  
   switch (sort) {
     case "liquidity":
-      return list.sort((a, b) => b.liquidityUsd - a.liquidityUsd);
+      return list.sort((a, b) => (b.liquidityUsd - a.liquidityUsd) * multiplier);
     case "alphabetical":
-      return list.sort((a, b) => a.name.localeCompare(b.name));
+      return list.sort((a, b) => a.name.localeCompare(b.name) * multiplier);
+    case "holders":
+      return list.sort((a, b) => (b.holders - a.holders) * multiplier);
+    case "volume":
+      return list.sort((a, b) => (b.volume24hUsd - a.volume24hUsd) * multiplier);
+    case "risk": {
+      const riskOrder: Record<RiskLevel, number> = { low: 1, medium: 2, high: 3 };
+      return list.sort((a, b) => (riskOrder[b.risk] - riskOrder[a.risk]) * multiplier);
+    }
+    case "updated": {
+      // Parse updatedAt as date string and compare
+      return list.sort((a, b) => {
+        const dateA = new Date(a.updatedAt).getTime();
+        const dateB = new Date(b.updatedAt).getTime();
+        return (dateB - dateA) * multiplier;
+      });
+    }
     case "score":
     default:
-      return list.sort((a, b) => b.benchmarkScore - a.benchmarkScore);
+      return list.sort((a, b) => (b.benchmarkScore - a.benchmarkScore) * multiplier);
   }
 }
 
@@ -297,6 +350,21 @@ async function buildTokenView(ctx: any, asset: Doc<"assets">): Promise<TokenView
   const summary = buildSummaryText(chainMeta.short, category, risk, benchmarkScore);
   const updatedAt = formatRelativeTime(latestScore.createdAt ?? asset.updatedAt);
 
+  // Get avatar URL - prefer Convex storage, fallback to GitHub CDN, then emoji
+  let avatarUrl: string | undefined;
+  if (asset.iconStorageId) {
+    // Get URL from Convex file storage (primary source)
+    try {
+      avatarUrl = await ctx.storage.getUrl(asset.iconStorageId);
+    } catch (error) {
+      // Fallback to GitHub CDN URL if storage URL fails
+      avatarUrl = asset.iconUrl;
+    }
+  } else {
+    // Use GitHub CDN URL if no storage ID
+    avatarUrl = asset.iconUrl;
+  }
+
   return {
     id,
     name: asset.name ?? asset.symbol ?? asset.address,
@@ -304,7 +372,7 @@ async function buildTokenView(ctx: any, asset: Doc<"assets">): Promise<TokenView
     chain: asset.chainId,
     chainLabel: chainMeta.short,
     address: asset.address,
-    avatar: asset.iconUrl ?? pickAvatar(asset.symbol ?? asset.name ?? asset.address, category),
+    avatar: avatarUrl ?? pickAvatar(asset.symbol ?? asset.name ?? asset.address, category),
     category,
     risk,
     benchmarkScore,
@@ -486,11 +554,22 @@ function formatUsdCompact(value: number) {
 
 function parseTokenId(tokenId: string) {
   if (!tokenId) return null;
+  
+  // Check if it's just an address (0x...)
+  const isAddressOnly = /^0x[a-fA-F0-9]{40}$/.test(tokenId.trim());
+  if (isAddressOnly) {
+    return { chainId: null, address: tokenId.trim().toLowerCase() };
+  }
+  
+  // Check if it's CAIP-19 format (eip155:1:erc20:0x...)
   const parts = tokenId.split(":");
-  if (parts.length < 4) return null;
-  const chainId = `${parts[0]}:${parts[1]}`;
-  const address = parts.slice(3).join(":").toLowerCase();
-  return { chainId, address };
+  if (parts.length >= 4 && parts[0] === "eip155") {
+    const chainId = `${parts[0]}:${parts[1]}`;
+    const address = parts.slice(3).join(":").toLowerCase();
+    return { chainId, address };
+  }
+  
+  return null;
 }
 
 export const search = query({
@@ -623,7 +702,7 @@ export const auditsByAsset = query({
 });
 
 export const ensureAsset = internalMutation({
-  args: { chainId: v.string(), address: v.string(), standard: v.string(), symbol: v.optional(v.string()), name: v.optional(v.string()), decimals: v.optional(v.number()), iconUrl: v.optional(v.string()), status: v.optional(v.string()) },
+  args: { chainId: v.string(), address: v.string(), standard: v.string(), symbol: v.optional(v.string()), name: v.optional(v.string()), decimals: v.optional(v.number()), iconUrl: v.optional(v.string()), iconStorageId: v.optional(v.id("_storage")), status: v.optional(v.string()) },
   handler: async (ctx, a) => {
     const now = Date.now();
     const address = a.address.toLowerCase();
@@ -634,6 +713,7 @@ export const ensureAsset = internalMutation({
         name: a.name ?? existing.name,
         decimals: a.decimals ?? existing.decimals,
         iconUrl: a.iconUrl ?? existing.iconUrl,
+        iconStorageId: a.iconStorageId ?? existing.iconStorageId,
         standard: a.standard ?? existing.standard,
         status: a.status ?? existing.status ?? "active",
         updatedAt: now,
@@ -641,7 +721,7 @@ export const ensureAsset = internalMutation({
       return existing._id;
     }
     return await ctx.db.insert("assets", {
-      chainId: a.chainId, address, standard: a.standard, symbol: a.symbol, name: a.name, decimals: a.decimals, iconUrl: a.iconUrl, status: a.status ?? "active", createdAt: now, updatedAt: now,
+      chainId: a.chainId, address, standard: a.standard, symbol: a.symbol, name: a.name, decimals: a.decimals, iconUrl: a.iconUrl, iconStorageId: a.iconStorageId, status: a.status ?? "active", createdAt: now, updatedAt: now,
     });
   },
 });
@@ -824,6 +904,57 @@ export const materializeJsonLd = internalAction({
     await ctx.runMutation(internal.assets.updateScoreJsonLd, { scoreId, jsonldStorageId: storageId });
     const url = await ctx.storage.getUrl(storageId);
     return { jsonldStorageId: storageId, url };
+  },
+});
+
+// Get assets that haven't been synced to GitHub yet
+export const getUnsyncedAssets = internalQuery({
+  handler: async (ctx) => {
+    return await ctx.db
+      .query("assets")
+      .filter((q) => 
+        q.and(
+          q.eq(q.field("status"), "active"),
+          q.neq(q.field("iconStorageId"), undefined),
+          q.or(
+            q.eq(q.field("githubSynced"), undefined),
+            q.eq(q.field("githubSynced"), false)
+          )
+        )
+      )
+      .collect();
+  },
+});
+
+// Mark asset as synced to GitHub
+export const markAssetSynced = internalMutation({
+  args: {
+    assetId: v.id("assets"),
+    githubUrl: v.string(),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.assetId, {
+      iconUrl: args.githubUrl,
+      githubSynced: true,
+      updatedAt: Date.now(),
+    });
+  },
+});
+
+// Update asset with icon storage ID
+export const updateAssetIcon = internalMutation({
+  args: {
+    assetId: v.id("assets"),
+    iconStorageId: v.id("_storage"),
+    iconUrl: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.assetId, {
+      iconStorageId: args.iconStorageId,
+      iconUrl: args.iconUrl,
+      githubSynced: false, // Reset sync status when icon is updated
+      updatedAt: Date.now(),
+    });
   },
 });
 

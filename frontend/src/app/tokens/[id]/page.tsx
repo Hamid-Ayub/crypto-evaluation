@@ -16,7 +16,9 @@ export const dynamic = "force-dynamic";
 
 export default async function TokenDetailPage({ params }: PageProps) {
   const { id } = await params;
-  const token = await fetchToken(id);
+  // Decode the ID in case it was URL encoded
+  const decodedId = decodeURIComponent(id);
+  const token = await fetchToken(decodedId);
   if (!token) {
     notFound();
   }
