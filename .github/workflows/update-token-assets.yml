@@ -120,11 +120,7 @@ jobs:
             ADDRESS="${{ github.event.inputs.address || github.event.client_payload.address }}"
             CHAIN_ID="${{ github.event.inputs.chainId || github.event.client_payload.chainId }}"
             SYMBOL="${{ github.event.inputs.symbol || github.event.client_payload.symbol }}"
-            git commit -m "chore: add token assets [skip ci]
-
-Token: ${ADDRESS}
-Chain: ${CHAIN_ID}
-Symbol: ${SYMBOL}"
+            git commit -m "chore: add token assets [skip ci]" -m "Token: ${ADDRESS}" -m "Chain: ${CHAIN_ID}" -m "Symbol: ${SYMBOL}"
             # Push using PAT token in URL
             PUBLIC_REPO="${{ secrets.PUBLIC_ASSETS_REPO || 'Hamid-Ayub/blockchain-assets' }}"
             PUBLIC_BRANCH="${{ secrets.PUBLIC_ASSETS_BRANCH || 'main' }}"
