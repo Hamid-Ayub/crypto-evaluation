@@ -20,6 +20,21 @@ export type LaunchMarketData = {
   sourceUrl?: string;
 };
 
+export type ExchangeListing = {
+  exchange: string;
+  pair: string;
+  baseSymbol: string;
+  targetSymbol: string;
+  priceUsd?: number;
+  volume24hUsd?: number;
+  trustScore?: string;
+  isDex?: boolean;
+  lastTradedAt?: number;
+  url?: string;
+  source: string;
+  sourceUrl?: string;
+};
+
 type CoinGeckoCoin = {
   id: string;
   symbol: string;
@@ -47,6 +62,26 @@ type CoinGeckoHistoryResponse = {
     start_date?: string;
     end_date?: string;
   };
+};
+
+type CoinGeckoTickersResponse = {
+  tickers: Array<{
+    base: string;
+    target: string;
+    market: {
+      name: string;
+      identifier?: string;
+      has_trading_incentive?: boolean;
+    };
+    converted_last?: { usd?: number };
+    converted_volume?: { usd?: number };
+    trust_score?: string;
+    last_traded_at?: string;
+    last_fetch_at?: string;
+    is_anomaly?: boolean;
+    is_stale?: boolean;
+    trade_url?: string;
+  }>;
 };
 
 async function fetchJson<T>(url: string): Promise<T> {
@@ -235,6 +270,63 @@ export async function fetchLaunchMarketData(
     }
   } catch (error) {
     console.error(`CoinGecko launch data error for chain ${chainId}, address ${address}:`, error);
+    return null;
+  }
+}
+
+/**
+ * Fetch exchange listings (CEX + DEX) for a token from CoinGecko
+ * Returns top markets sorted by trust score / volume
+ */
+export async function fetchExchangeListings(
+  chainId: string | number,
+  address: string,
+  options?: { limit?: number }
+): Promise<ExchangeListing[] | null> {
+  const limit = options?.limit ?? 12;
+  try {
+    const coinId = await findCoinId(chainId, address);
+    if (!coinId) return null;
+
+    const url = `${COINGECKO_BASE}/coins/${coinId}/tickers`;
+    const params = new URLSearchParams({
+      include_exchange_logo: "false",
+      order: "trust_score_desc",
+      depth: "true",
+    });
+
+    if (COINGECKO_KEY) {
+      params.set("x_cg_demo_api_key", COINGECKO_KEY);
+    }
+
+    const data = await fetchJson<CoinGeckoTickersResponse>(`${url}?${params.toString()}`);
+    if (!Array.isArray(data.tickers) || data.tickers.length === 0) return null;
+
+    const listings = data.tickers
+      .filter((ticker) => Boolean(ticker.market?.name))
+      .map<ExchangeListing>((ticker) => {
+        const timestamp = ticker.last_traded_at ?? ticker.last_fetch_at;
+        return {
+          exchange: ticker.market?.name ?? "Unknown",
+          pair: `${ticker.base}/${ticker.target}`,
+          baseSymbol: ticker.base,
+          targetSymbol: ticker.target,
+          priceUsd: ticker.converted_last?.usd,
+          volume24hUsd: ticker.converted_volume?.usd,
+          trustScore: ticker.trust_score ?? undefined,
+          isDex: ticker.market?.identifier?.includes("dex") ?? false,
+          lastTradedAt: timestamp ? Math.floor(new Date(timestamp).getTime() / 1000) : undefined,
+          url: ticker.trade_url ?? undefined,
+          source: "coingecko",
+          sourceUrl: `https://www.coingecko.com/en/coins/${coinId}`,
+        };
+      })
+      .filter((listing) => listing.volume24hUsd || listing.priceUsd || listing.url)
+      .slice(0, limit);
+
+    return listings.length ? listings : null;
+  } catch (error) {
+    console.error(`CoinGecko listings error for chain ${chainId}, address ${address}:`, error);
     return null;
   }
 }

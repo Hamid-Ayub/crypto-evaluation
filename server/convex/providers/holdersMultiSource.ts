@@ -1,11 +1,12 @@
 import { HoldersSnapshot } from "./types";
 import { fetchHoldersSnapshot } from "./holders";
 import { fetchHoldersFromCovalent } from "./covalent";
+import { fetchHoldersFromEtherscan } from "./etherscanHolders";
 import { toNumericChainId } from "./chains";
 
 /**
  * Aggregate holder data from multiple sources with consensus
- * Currently supports: Ethplorer (Ethereum only) + Covalent (multi-chain)
+ * Currently supports: Ethplorer (Ethereum only) + Covalent (multi-chain) + Etherscan (multi-chain)
  */
 export async function fetchHoldersMultiSource(
   chainId: string | number,
@@ -26,7 +27,17 @@ export async function fetchHoldersMultiSource(
     }
   }
 
-  // Try Covalent (multi-chain)
+  // Try Etherscan family APIs (multi-chain, free tier available)
+  try {
+    const etherscanData = await fetchHoldersFromEtherscan(chainId, address);
+    if (etherscanData) {
+      sources.push({ name: "etherscan", data: etherscanData });
+    }
+  } catch (error) {
+    console.error("Etherscan fetch failed:", error);
+  }
+
+  // Try Covalent (multi-chain) - fallback if Etherscan fails
   try {
     const covalentData = await fetchHoldersFromCovalent(chainId, address);
     if (covalentData) {

@@ -58,7 +58,12 @@ export type TokenView = {
       sourceUrl?: string;
       updatedAt?: number;
     };
+    listings?: ExchangeListing[];
   };
+  projectProfile?: ProjectProfile;
+  development?: DevelopmentOverview;
+  aiSections?: Record<string, AiSectionEntry>;
+  parsedProjectData?: any; // Parsed structured data from project websites
   // Cross-validation info
   crossValidation?: {
     sources?: string[];
@@ -123,6 +128,76 @@ type TokenListResponse = {
   items: TokenView[];
   pagination: { page: number; pageSize: number; totalItems: number; totalPages: number };
   summary: TokenListSummary;
+};
+
+type ExchangeListing = {
+  exchange: string;
+  pair: string;
+  baseSymbol: string;
+  targetSymbol: string;
+  priceUsd?: number;
+  volume24hUsd?: number;
+  trustScore?: string;
+  isDex?: boolean;
+  lastTradedAt?: number;
+  url?: string;
+  source?: string;
+  sourceUrl?: string;
+};
+
+type ProjectProfile = {
+  githubRepos?: string[];
+  website?: string;
+  docs?: string;
+  twitter?: string;
+  discord?: string;
+  telegram?: string;
+};
+
+type DevelopmentRepoStats = {
+  repo: string;
+  repoUrl: string;
+  owner: string;
+  name: string;
+  description?: string;
+  homepage?: string;
+  license?: string;
+  stars: number;
+  forks: number;
+  watchers: number;
+  openIssues: number;
+  subscribers?: number;
+  defaultBranch?: string;
+  primaryLanguage?: string;
+  topics?: string[];
+  commitsLast4Weeks?: number;
+  commitsThisYear?: number;
+  avgWeeklyCommits?: number;
+  contributorsCount?: number;
+  lastCommitAt?: number;
+  lastReleaseAt?: number;
+  lastReleaseTag?: string;
+  fetchedAt: number;
+  source?: string;
+  error?: string;
+};
+
+type DevelopmentOverview = {
+  repos: DevelopmentRepoStats[];
+};
+
+type AiSectionEntry = {
+  sectionId: string;
+  content: string;
+  model: string;
+  tokensUsed?: number;
+  updatedAt: number;
+  sources?: Array<{
+    id: number;
+    title?: string;
+    url: string;
+    snippet?: string;
+  }>;
 };
 
 type TokenListArgs = {
@@ -376,7 +451,18 @@ function buildSummaryBlock(tokens: TokenView[]): TokenListSummary {
 }
 
 async function buildTokenView(ctx: any, asset: Doc<"assets">): Promise<TokenView | null> {
-  const [scoreHistory, holdersRows, liquidityRows, governanceRows, marketDataRows, contractRows, auditRows] = await Promise.all([
+  const [
+    scoreHistory,
+    holdersRows,
+    liquidityRows,
+    governanceRows,
+    marketDataRows,
+    contractRows,
+    auditRows,
+    projectProfileRows,
+    developmentRows,
+    aiSectionRows,
+  ] = await Promise.all([
     ctx.db
       .query("scores")
       .withIndex("by_asset_block", (q2: any) => q2.eq("assetId", asset._id))
@@ -412,6 +498,19 @@ async function buildTokenView(ctx: any, asset: Doc<"assets">): Promise<TokenView
       .withIndex("by_asset", (q2: any) => q2.eq("assetId", asset._id))
       .order("desc")
       .take(50),
+    ctx.db
+      .query("project_profiles")
+      .withIndex("by_asset", (q2: any) => q2.eq("assetId", asset._id))
+      .take(1),
+    ctx.db
+      .query("development_stats")
+      .withIndex("by_asset_repo", (q2: any) => q2.eq("assetId", asset._id))
+      .order("desc")
+      .take(10),
+    ctx.db
+      .query("ai_sections")
+      .withIndex("by_asset_section", (q2: any) => q2.eq("assetId", asset._id))
+      .collect(),
   ]);
 
   const latestScore = scoreHistory[0] ?? null;
@@ -423,6 +522,7 @@ async function buildTokenView(ctx: any, asset: Doc<"assets">): Promise<TokenView
   const marketData = marketDataRows[0] ?? null;
   const contract = contractRows[0] ?? null;
   const audits = auditRows ?? [];
+  const projectProfile = projectProfileRows[0] ?? null;
 
   const chainMeta = getChainMeta(asset.chainId);
   const category = inferCategory(asset, chainMeta.defaultCategory);
@@ -455,23 +555,127 @@ async function buildTokenView(ctx: any, asset: Doc<"assets">): Promise<TokenView
   }
 
   // Build market data object (contextual research information)
-  const marketDataObj = marketData ? {
-    launch: marketData.launchDate || marketData.initialMarketCapUsd || marketData.initialPriceUsd ? {
-      date: marketData.launchDate,
-      marketCapUsd: marketData.initialMarketCapUsd,
-      priceUsd: marketData.initialPriceUsd,
-      source: marketData.launchSource,
-      sourceUrl: marketData.launchSourceUrl,
-    } : undefined,
-    current: marketData.marketCapUsd || marketData.priceUsd || marketData.volume24hUsd ? {
-      marketCapUsd: marketData.marketCapUsd,
-      priceUsd: marketData.priceUsd,
-      volume24hUsd: marketData.volume24hUsd,
-      source: marketData.currentSource,
-      sourceUrl: marketData.currentSourceUrl,
-      updatedAt: marketData.updatedAt,
-    } : undefined,
-  } : undefined;
+  const listings =
+    marketData?.exchangeListings && marketData.exchangeListings.length > 0
+      ? marketData.exchangeListings.map((listing) => ({
+          exchange: listing.exchange,
+          pair: listing.pair,
+          baseSymbol: listing.baseSymbol,
+          targetSymbol: listing.targetSymbol,
+          priceUsd: listing.priceUsd,
+          volume24hUsd: listing.volume24hUsd,
+          trustScore: listing.trustScore,
+          isDex: listing.isDex,
+          lastTradedAt: listing.lastTradedAt,
+          url: listing.url,
+          source: listing.source,
+          sourceUrl: listing.sourceUrl,
+        }))
+      : undefined;
+
+  const hasLaunchData =
+    Boolean(marketData?.launchDate) ||
+    Boolean(marketData?.initialMarketCapUsd) ||
+    Boolean(marketData?.initialPriceUsd);
+
+  const hasCurrentData =
+    Boolean(marketData?.marketCapUsd) ||
+    Boolean(marketData?.priceUsd) ||
+    Boolean(marketData?.volume24hUsd);
+
+  const marketDataObj =
+    marketData && (hasLaunchData || hasCurrentData || listings)
+      ? {
+          launch: hasLaunchData
+            ? {
+                date: marketData?.launchDate,
+                marketCapUsd: marketData?.initialMarketCapUsd,
+                priceUsd: marketData?.initialPriceUsd,
+                source: marketData?.launchSource,
+                sourceUrl: marketData?.launchSourceUrl,
+              }
+            : undefined,
+          current: hasCurrentData
+            ? {
+                marketCapUsd: marketData?.marketCapUsd,
+                priceUsd: marketData?.priceUsd,
+                volume24hUsd: marketData?.volume24hUsd,
+                source: marketData?.currentSource,
+                sourceUrl: marketData?.currentSourceUrl,
+                updatedAt: marketData?.updatedAt,
+              }
+            : undefined,
+          listings,
+        }
+      : undefined;
+
+  const projectProfileInfo = projectProfile
+    ? {
+        githubRepos: projectProfile.githubRepos,
+        website: projectProfile.website,
+        docs: projectProfile.docs,
+        twitter: projectProfile.twitter,
+        discord: projectProfile.discord,
+        telegram: projectProfile.telegram,
+      }
+    : undefined;
+
+  const development =
+    developmentRows && developmentRows.length > 0
+      ? {
+          repos: developmentRows.map(
+            (row: Doc<"development_stats">): DevelopmentRepoStats => ({
+              repo: row.repo,
+              repoUrl: row.repoUrl,
+              owner: row.owner,
+              name: row.name,
+              description: row.description,
+              homepage: row.homepage,
+              license: row.license,
+              stars: row.stars,
+              forks: row.forks,
+              watchers: row.watchers,
+              openIssues: row.openIssues,
+              subscribers: row.subscribers,
+              defaultBranch: row.defaultBranch,
+              primaryLanguage: row.primaryLanguage,
+              topics: row.topics,
+              commitsLast4Weeks: row.commitsLast4Weeks,
+              commitsThisYear: row.commitsThisYear,
+              avgWeeklyCommits: row.avgWeeklyCommits,
+              contributorsCount: row.contributorsCount,
+              lastCommitAt: row.lastCommitAt,
+              lastReleaseAt: row.lastReleaseAt,
+              lastReleaseTag: row.lastReleaseTag,
+              fetchedAt: row.fetchedAt,
+              source: row.source,
+              error: row.error,
+            }),
+          ),
+        }
+      : undefined;
+
+  const aiSections =
+    aiSectionRows && aiSectionRows.length > 0
+      ? aiSectionRows.reduce<Record<string, AiSectionEntry>>((acc, row: Doc<"ai_sections">) => {
+          acc[row.sectionId] = {
+            sectionId: row.sectionId,
+            content: row.content,
+            model: row.model,
+            tokensUsed: row.tokensUsed ?? undefined,
+            updatedAt: row.updatedAt,
+            sources: row.sources
+              ? row.sources.map((source) => ({
+                  id: source.id,
+                  title: source.title,
+                  url: source.url,
+                  snippet: source.snippet,
+                }))
+              : undefined,
+          };
+          return acc;
+        }, {})
+      : undefined;
 
   // Build cross-validation info from holders data
   const crossValidation = holders?.sources || holders?.crossValidationStatus ? {
@@ -552,6 +756,10 @@ async function buildTokenView(ctx: any, asset: Doc<"assets">): Promise<TokenView
     sparkline: buildSparkline(scoreHistory),
     stats: buildStats(latestScore, scoreHistory[1], liquidityUsd),
     marketData: marketDataObj,
+    projectProfile: projectProfileInfo,
+    development,
+    aiSections,
+    parsedProjectData: asset.parsedProjectData,
     crossValidation,
     contract: contractInfo,
     holdersDetail,
@@ -881,6 +1089,93 @@ export const auditsByAsset = query({
   },
 });
 
+export const getAiSection = query({
+  args: { assetId: v.id("assets"), sectionId: v.string() },
+  handler: async (ctx, { assetId, sectionId }) => {
+    const rows = await ctx.db
+      .query("ai_sections")
+      .withIndex("by_asset_section", q => q.eq("assetId", assetId).eq("sectionId", sectionId))
+      .take(1);
+    return rows[0] ?? null;
+  },
+});
+
+export const listAiSections = query({
+  args: { assetId: v.id("assets") },
+  handler: async (ctx, { assetId }) => {
+    return await ctx.db
+      .query("ai_sections")
+      .withIndex("by_asset_section", q => q.eq("assetId", assetId))
+      .collect();
+  },
+});
+
+export const insertAiSectionLog = internalMutation({
+  args: {
+    assetId: v.id("assets"),
+    sectionId: v.string(),
+    status: v.string(),
+    model: v.optional(v.string()),
+    tokensUsed: v.optional(v.number()),
+    latencyMs: v.optional(v.number()),
+    error: v.optional(v.string()),
+  },
+  handler: async (ctx, { assetId, sectionId, status, model, tokensUsed, latencyMs, error }) => {
+    const now = Date.now();
+    return await ctx.db.insert("ai_section_logs", {
+      assetId,
+      sectionId,
+      status,
+      model,
+      tokensUsed,
+      latencyMs,
+      error,
+      createdAt: now,
+    });
+  },
+});
+
+export const listAiSectionLogs = query({
+  args: {
+    assetId: v.id("assets"),
+    sectionId: v.optional(v.string()),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, { assetId, sectionId, limit = 20 }) => {
+    let query = ctx.db
+      .query("ai_section_logs")
+      .withIndex("by_asset_section", q => q.eq("assetId", assetId));
+    if (sectionId) {
+      query = query.filter(q => q.eq(q.field("sectionId"), sectionId));
+    }
+    const rows: Doc<"ai_section_logs">[] = [];
+    for await (const row of query.order("desc")) {
+      rows.push(row);
+      if (rows.length >= limit) break;
+    }
+    return rows;
+  },
+});
+
+export const getProjectProfile = query({
+  args: { assetId: v.id("assets") },
+  handler: async (ctx, { assetId }) => {
+    const rows = await ctx.db.query("project_profiles").withIndex("by_asset", q => q.eq("assetId", assetId)).take(1);
+    return rows[0] ?? null;
+  },
+});
+
+export const listDevelopmentStats = query({
+  args: { assetId: v.id("assets") },
+  handler: async (ctx, { assetId }) => {
+    return await ctx.db
+      .query("development_stats")
+      .withIndex("by_asset_repo", q => q.eq("assetId", assetId))
+      .order("desc")
+      .collect();
+  },
+});
+
 export const ensureAsset = internalMutation({
   args: { chainId: v.string(), address: v.string(), standard: v.string(), symbol: v.optional(v.string()), name: v.optional(v.string()), decimals: v.optional(v.number()), iconUrl: v.optional(v.string()), iconStorageId: v.optional(v.id("_storage")), status: v.optional(v.string()) },
   handler: async (ctx, a) => {
@@ -1013,6 +1308,20 @@ export const upsertMarketData = internalMutation({
       volume24hUsd: v.optional(v.number()),
       currentSource: v.optional(v.string()),
       currentSourceUrl: v.optional(v.string()),
+      exchangeListings: v.optional(v.array(v.object({
+        exchange: v.string(),
+        pair: v.string(),
+        baseSymbol: v.string(),
+        targetSymbol: v.string(),
+        priceUsd: v.optional(v.number()),
+        volume24hUsd: v.optional(v.number()),
+        trustScore: v.optional(v.string()),
+        isDex: v.optional(v.boolean()),
+        lastTradedAt: v.optional(v.number()),
+        url: v.optional(v.string()),
+        source: v.optional(v.string()),
+        sourceUrl: v.optional(v.string()),
+      }))),
     })
   },
   handler: async (ctx, { assetId, data }) => {
@@ -1030,6 +1339,135 @@ export const upsertMarketData = internalMutation({
       ...data, 
       createdAt: now, 
       updatedAt: now 
+    });
+  },
+});
+
+export const upsertAiSection = internalMutation({
+  args: {
+    assetId: v.id("assets"),
+    sectionId: v.string(),
+    data: v.object({
+      content: v.string(),
+      model: v.string(),
+      promptHash: v.string(),
+      tokensUsed: v.optional(v.number()),
+      latencyMs: v.optional(v.number()),
+      sourceDataHash: v.optional(v.string()),
+      sources: v.optional(
+        v.array(
+          v.object({
+            id: v.number(),
+            title: v.optional(v.string()),
+            url: v.string(),
+            snippet: v.optional(v.string()),
+          }),
+        ),
+      ),
+    }),
+  },
+  handler: async (ctx, { assetId, sectionId, data }) => {
+    const now = Date.now();
+    const existing = await ctx.db
+      .query("ai_sections")
+      .withIndex("by_asset_section", q => q.eq("assetId", assetId).eq("sectionId", sectionId))
+      .take(1);
+    if (existing[0]) {
+      await ctx.db.patch(existing[0]._id, { ...data, updatedAt: now });
+      return existing[0]._id;
+    }
+    return await ctx.db.insert("ai_sections", {
+      assetId,
+      sectionId,
+      ...data,
+      createdAt: now,
+      updatedAt: now,
+    });
+  },
+});
+
+export const upsertProjectProfile = internalMutation({
+  args: {
+    assetId: v.id("assets"),
+    profile: v.object({
+      githubRepos: v.optional(v.array(v.string())),
+      website: v.optional(v.string()),
+      docs: v.optional(v.string()),
+      twitter: v.optional(v.string()),
+      discord: v.optional(v.string()),
+      telegram: v.optional(v.string()),
+    }),
+  },
+  handler: async (ctx, { assetId, profile }) => {
+    const now = Date.now();
+    const existing = await ctx.db
+      .query("project_profiles")
+      .withIndex("by_asset", q => q.eq("assetId", assetId))
+      .take(1);
+    if (existing[0]) {
+      await ctx.db.patch(existing[0]._id, { ...profile, updatedAt: now });
+      return existing[0]._id;
+    }
+    return await ctx.db.insert("project_profiles", {
+      assetId,
+      ...profile,
+      createdAt: now,
+      updatedAt: now,
+    });
+  },
+});
+
+export const upsertDevelopmentStats = internalMutation({
+  args: {
+    assetId: v.id("assets"),
+    repo: v.string(),
+    data: v.object({
+      repoUrl: v.string(),
+      owner: v.string(),
+      name: v.string(),
+      description: v.optional(v.string()),
+      homepage: v.optional(v.string()),
+      license: v.optional(v.string()),
+      stars: v.number(),
+      forks: v.number(),
+      watchers: v.number(),
+      openIssues: v.number(),
+      subscribers: v.optional(v.number()),
+      defaultBranch: v.optional(v.string()),
+      primaryLanguage: v.optional(v.string()),
+      topics: v.optional(v.array(v.string())),
+      commitsLast4Weeks: v.optional(v.number()),
+      commitsThisYear: v.optional(v.number()),
+      avgWeeklyCommits: v.optional(v.number()),
+      contributorsCount: v.optional(v.number()),
+      lastCommitAt: v.optional(v.number()),
+      lastReleaseAt: v.optional(v.number()),
+      lastReleaseTag: v.optional(v.string()),
+      fetchedAt: v.number(),
+      source: v.string(),
+      error: v.optional(v.string()),
+    }),
+  },
+  handler: async (ctx, { assetId, repo, data }) => {
+    const now = Date.now();
+    const existing = await ctx.db
+      .query("development_stats")
+      .withIndex("by_asset_repo", q => q.eq("assetId", assetId).eq("repo", repo))
+      .unique();
+    if (existing) {
+      await ctx.db.patch(existing._id, {
+        ...data,
+        repo,
+        updatedAt: now,
+      });
+      return existing._id;
+    }
+    return await ctx.db.insert("development_stats", {
+      assetId,
+      repo,
+      ...data,
+      createdAt: now,
+      updatedAt: now,
     });
   },
 });

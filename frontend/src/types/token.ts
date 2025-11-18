@@ -11,6 +11,78 @@ export type BenchmarkDetails = {
   controlRisk: number;
 };
 
+export type ExchangeListing = {
+  exchange: string;
+  pair: string;
+  baseSymbol: string;
+  targetSymbol: string;
+  priceUsd?: number;
+  volume24hUsd?: number;
+  trustScore?: string;
+  isDex?: boolean;
+  lastTradedAt?: number;
+  url?: string;
+  source?: string;
+  sourceUrl?: string;
+};
+
+export type ProjectProfile = {
+  githubRepos?: string[];
+  website?: string;
+  docs?: string;
+  twitter?: string;
+  discord?: string;
+  telegram?: string;
+};
+
+export type DevelopmentRepo = {
+  repo: string;
+  repoUrl: string;
+  owner: string;
+  name: string;
+  description?: string;
+  homepage?: string;
+  license?: string;
+  stars: number;
+  forks: number;
+  watchers: number;
+  openIssues: number;
+  subscribers?: number;
+  defaultBranch?: string;
+  primaryLanguage?: string;
+  topics?: string[];
+  commitsLast4Weeks?: number;
+  commitsThisYear?: number;
+  avgWeeklyCommits?: number;
+  contributorsCount?: number;
+  lastCommitAt?: number;
+  lastReleaseAt?: number;
+  lastReleaseTag?: string;
+  fetchedAt: number;
+  source?: string;
+  error?: string;
+};
+
+export type DevelopmentOverview = {
+  repos: DevelopmentRepo[];
+};
+
+export type AiSectionSource = {
+  id: number;
+  title?: string;
+  url: string;
+  snippet?: string;
+};
+
+export type AiSectionEntry = {
+  sectionId: string;
+  content: string;
+  model: string;
+  tokensUsed?: number;
+  updatedAt: number;
+  sources?: AiSectionSource[];
+};
+
 export type TokenRecord = {
   id: string;
   name: string;
@@ -49,6 +121,16 @@ export type TokenRecord = {
       sourceUrl?: string;
       updatedAt?: number;
     };
+    listings?: ExchangeListing[];
+  };
+  projectProfile?: ProjectProfile;
+  development?: DevelopmentOverview;
+  aiSections?: Record<string, AiSectionEntry>;
+  parsedProjectData?: {
+    foundingTeam?: any;
+    roadmap?: any;
+    links?: any;
+    tokenomics?: any;
   };
   // Cross-validation info
   crossValidation?: {

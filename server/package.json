@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "convex dev",
     "deploy": "convex deploy",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
   },
   "keywords": [
     "blockchain",
@@ -18,13 +19,14 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "@google/generative-ai": "^0.24.1",
     "convex": "^1.0.0",
-    "viem": "^2.0.0",
-    "cross-fetch": "^4.0.0"
+    "cross-fetch": "^4.0.0",
+    "viem": "^2.0.0"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
-    "typescript": "^5.0.0"
+    "typescript": "^5.0.0",
+    "vitest": "^4.0.10"
   }
 }
-

@@ -1,7 +1,8 @@
 import { v } from "convex/values";
 import { action } from "./_generated/server";
-import { internal } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 import { ProviderAdapter } from "./providers/types";
+import { lookupProjectMetadata } from "./projectMetadata";
 
 async function loadComposite(): Promise<ProviderAdapter> {
   const mod = await import("./providers/composite");
@@ -63,8 +64,8 @@ export const ingestAssetSnapshot = action({
       settle(adapter.getAudits ? adapter.getAudits(chainId, address) : Promise.resolve([] as any)),
     ]);
 
-    // Fetch market data (launch + current snapshot) from CoinGecko
-    const [launchData, currentData] = await Promise.all([
+    // Fetch market data (launch + current snapshot + exchange listings) from CoinGecko
+    const [launchData, currentData, listingsData] = await Promise.all([
       settle((async () => {
         const { fetchLaunchMarketData } = await import("./providers/coingecko");
         return fetchLaunchMarketData(chainId, address);
@@ -72,6 +73,10 @@ export const ingestAssetSnapshot = action({
       settle((async () => {
         const { fetchCurrentMarketData } = await import("./providers/coingecko");
         return fetchCurrentMarketData(chainId, address);
+      })()),
+      settle((async () => {
+        const { fetchExchangeListings } = await import("./providers/coingecko");
+        return fetchExchangeListings(chainId, address);
       })()),
     ]);
 
@@ -126,6 +131,20 @@ export const ingestAssetSnapshot = action({
       status: "active",
     });
 
+    const seededProfile = lookupProjectMetadata(chainId, address, args.standard ?? "erc20");
+    let projectProfile = await ctx.runQuery(api.assets.getProjectProfile, { assetId });
+    if (!projectProfile && seededProfile) {
+      await ctx.runMutation(internal.assets.upsertProjectProfile, {
+        assetId,
+        profile: seededProfile,
+      });
+      projectProfile = await ctx.runQuery(api.assets.getProjectProfile, { assetId });
+    }
+    const githubRepos =
+      projectProfile?.githubRepos ??
+      seededProfile?.githubRepos ??
+      [];
+
     if (c.ok) await ctx.runMutation(internal.assets.insertContract, { assetId, data: c.v });
     if (h.ok) await ctx.runMutation(internal.assets.insertHolders, { assetId, data: h.v });
     if (l.ok) await ctx.runMutation(internal.assets.insertLiquidity, { assetId, data: l.v });
@@ -136,7 +155,9 @@ export const ingestAssetSnapshot = action({
     }
 
     // Store market data (launch + current snapshot)
-    if ((launchData.ok && launchData.v) || (currentData.ok && currentData.v)) {
+    const hasListings = listingsData.ok && Array.isArray(listingsData.v) && listingsData.v.length > 0;
+
+    if ((launchData.ok && launchData.v) || (currentData.ok && currentData.v) || hasListings) {
       await ctx.runMutation(internal.assets.upsertMarketData, {
         assetId,
         data: {
@@ -154,8 +175,88 @@ export const ingestAssetSnapshot = action({
             currentSource: currentData.v.source,
             currentSourceUrl: currentData.v.sourceUrl,
           } : {}),
+          ...(hasListings ? { exchangeListings: listingsData.v ?? [] } : {}),
         },
       });
+    }
+
+    if (githubRepos.length > 0) {
+      const repoStatsResults = await Promise.allSettled(
+        githubRepos.map(async (repoInput) => {
+          const { getGitHubStats } = await import("./providers/github");
+          return getGitHubStats(repoInput);
+        }),
+      );
+
+      for (let i = 0; i < githubRepos.length; i++) {
+        const repoInput = githubRepos[i];
+        const result = repoStatsResults[i];
+        if (result?.status === "fulfilled" && result.value) {
+          const stats = result.value;
+          await ctx.runMutation(internal.assets.upsertDevelopmentStats, {
+            assetId,
+            repo: stats.repo,
+            data: {
+              repoUrl: stats.repoUrl,
+              owner: stats.owner,
+              name: stats.name,
+              description: stats.description,
+              homepage: stats.homepage,
+              license: stats.license,
+              stars: stats.stars,
+              forks: stats.forks,
+              watchers: stats.watchers,
+              openIssues: stats.openIssues,
+              subscribers: stats.subscribers,
+              defaultBranch: stats.defaultBranch,
+              primaryLanguage: stats.primaryLanguage,
+              topics: stats.topics,
+              commitsLast4Weeks: stats.commitsLast4Weeks,
+              commitsThisYear: stats.commitsThisYear,
+              avgWeeklyCommits: stats.avgWeeklyCommits,
+              contributorsCount: stats.contributorsCount,
+              lastCommitAt: stats.lastCommitAt,
+              lastReleaseAt: stats.lastReleaseAt,
+              lastReleaseTag: stats.lastReleaseTag,
+              fetchedAt: stats.fetchedAt,
+              source: "github",
+              error: undefined,
+            },
+          });
+        } else {
+          const [owner = "", name = ""] = repoInput.replace("https://github.com/", "").replace("git@github.com:", "").replace(".git", "").split("/").filter(Boolean);
+          await ctx.runMutation(internal.assets.upsertDevelopmentStats, {
+            assetId,
+            repo: owner && name ? `${owner}/${name}` : repoInput,
+            data: {
+              repoUrl: repoInput.startsWith("http") ? repoInput : `https://github.com/${repoInput}`,
+              owner: owner || repoInput,
+              name: name || repoInput,
+              description: undefined,
+              homepage: undefined,
+              license: undefined,
+              stars: 0,
+              forks: 0,
+              watchers: 0,
+              openIssues: 0,
+              subscribers: undefined,
+              defaultBranch: undefined,
+              primaryLanguage: undefined,
+              topics: undefined,
+              commitsLast4Weeks: undefined,
+              commitsThisYear: undefined,
+              avgWeeklyCommits: undefined,
+              contributorsCount: undefined,
+              lastCommitAt: undefined,
+              lastReleaseAt: undefined,
+              lastReleaseTag: undefined,
+              fetchedAt: Date.now(),
+              source: "github",
+              error: result?.status === "rejected" ? (result.reason as Error)?.message ?? "github-fetch-error" : "github-missing-data",
+            },
+          });
+        }
+      }
     }
 
     const asOfBlock = Math.max(c.ok ? c.v.asOfBlock : 0, h.ok ? h.v.asOfBlock : 0, l.ok ? l.v.asOfBlock : 0);

@@ -1,4 +1,4 @@
-import { TokenRecord } from "@/types/token";
+import { AiSectionSource, TokenRecord } from "@/types/token";
 
 export type ScoreLookupPayload = {
   chainId: string;
@@ -40,6 +40,16 @@ export type TokenListResponse = {
     riskBreakdown: { low: number; medium: number; high: number };
     topLiquidity: TokenRecord[];
   };
+};
+
+export type AiSectionResponse = {
+  sectionId: string;
+  content: string;
+  model?: string;
+  tokensUsed?: number;
+  updatedAt?: number;
+  cached?: boolean;
+  sources?: AiSectionSource[];
 };
 
 const DEFAULT_CONVEX_SITE = "https://nautical-rat-318.convex.site";
@@ -130,6 +140,40 @@ export async function fetchToken(tokenId: string): Promise<TokenRecord | null> {
   return await response.json();
 }
 
+export async function fetchReport(tokenId: string): Promise<TokenRecord | null> {
+  const url = new URL(`${API_BASE}/api/report`);
+  url.searchParams.set("tokenId", tokenId);
+  const response = await fetch(url.toString(), { cache: "no-store" });
+  if (!response.ok) {
+    if (response.status === 404) return null;
+    throw new Error(`Failed to fetch report: ${response.statusText}`);
+  }
+  return await response.json();
+}
+
+export async function generateReportSection(
+  tokenId: string,
+  section: string,
+  context?: string,
+  options?: { force?: boolean },
+): Promise<AiSectionResponse> {
+  const response = await fetch(`${API_BASE}/api/report/section`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      tokenId,
+      section,
+      context,
+      force: options?.force ?? false,
+    }),
+  });
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({ error: response.statusText }));
+    throw new Error(errorData.error || `Failed to generate section: ${response.statusText}`);
+  }
+  return await response.json();
+}
+
 export async function requestRefresh(chainId: string, address: string): Promise<{ enqueued: boolean }> {
   const response = await fetch(`${API_BASE}/api/refresh`, {
     method: "POST",
@@ -140,6 +184,27 @@ export async function requestRefresh(chainId: string, address: string): Promise<
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({ error: response.statusText }));
     throw new Error(errorData.error || `Failed to request refresh: ${response.statusText}`);
+  }
+
+  return await response.json();
+}
+
+export async function parseProjectData(
+  tokenId: string,
+  options?: { force?: boolean },
+): Promise<{ cached: boolean; data: any; error?: string }> {
+  const response = await fetch(`${API_BASE}/api/project/parse`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      tokenId,
+      force: options?.force ?? false,
+    }),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({ error: response.statusText }));
+    throw new Error(errorData.error || `Failed to parse project data: ${response.statusText}`);
   }
 
   return await response.json();
@@ -168,5 +233,17 @@ export function formatUsd(value: number, options: Intl.NumberFormatOptions = {})
     maximumFractionDigits: 1,
     ...options,
   }).format(value);
+}
+
+export function formatNumber(value: string | number): string {
+  const num = typeof value === "string" ? parseFloat(value) : value;
+  if (isNaN(num)) return "N/A";
+  if (num >= 1e18) return `${(num / 1e18).toFixed(2)}B`;
+  if (num >= 1e15) return `${(num / 1e15).toFixed(2)}T`;
+  if (num >= 1e12) return `${(num / 1e12).toFixed(2)}T`;
+  if (num >= 1e9) return `${(num / 1e9).toFixed(2)}B`;
+  if (num >= 1e6) return `${(num / 1e6).toFixed(2)}M`;
+  if (num >= 1e3) return `${(num / 1e3).toFixed(2)}K`;
+  return num.toLocaleString();
 }
 

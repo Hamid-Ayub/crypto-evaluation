@@ -34,6 +34,9 @@ const postEndpoints = [
   "/api/scheduler/pause",
   "/api/scheduler/discover",
   "/api/jobs/process",
+  "/api/report/section",
+  "/api/report/generateAll",
+  "/api/project/parse",
 ];
 
 for (const path of postEndpoints) {
@@ -195,6 +198,139 @@ router.route({
 });
 
 router.route({
+  path: "/api/report",
+  method: "GET",
+  handler: httpAction(async (ctx, req) => {
+    const url = new URL(req.url);
+    const tokenId = url.searchParams.get("tokenId");
+    if (!tokenId) return withCors(new Response("Missing tokenId", { status: 400 }));
+    const token = await ctx.runQuery(api.assets.getEnriched, { tokenId });
+    if (!token) return withCors(new Response("Not found", { status: 404 }));
+    return withCors(
+      new Response(JSON.stringify(token), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+  }),
+});
+
+router.route({
+  path: "/api/report/section",
+  method: "POST",
+  handler: httpAction(async (ctx, req) => {
+    try {
+      const body = await req.json();
+      const { tokenId, section, context, force } = body ?? {};
+      if (!tokenId || !section) {
+        return withCors(
+          new Response(JSON.stringify({ error: "Missing tokenId or section" }), {
+            status: 400,
+            headers: { "content-type": "application/json" },
+          }),
+        );
+      }
+      const result = await ctx.runAction(internal.aiContent.generateSection, {
+        tokenId,
+        section,
+        context,
+        force,
+      });
+      return withCors(
+        new Response(JSON.stringify(result), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+    } catch (error: any) {
+      console.error("Error generating report section:", error);
+      return withCors(
+        new Response(JSON.stringify({ error: error?.message ?? "ai-section-error" }), {
+          status: 500,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+    }
+  }),
+});
+
+router.route({
+  path: "/api/project/parse",
+  method: "POST",
+  handler: httpAction(async (ctx, req) => {
+    try {
+      const body = await req.json();
+      const { tokenId, force } = body ?? {};
+      if (!tokenId) {
+        return withCors(
+          new Response(JSON.stringify({ error: "Missing tokenId" }), {
+            status: 400,
+            headers: { "content-type": "application/json" },
+          }),
+        );
+      }
+      const result = await ctx.runAction(api.projectParser.parseProjectData, {
+        tokenId,
+        force: force ?? false,
+      });
+      return withCors(
+        new Response(JSON.stringify(result), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+    } catch (error: any) {
+      console.error("Error parsing project data:", error);
+      return withCors(
+        new Response(JSON.stringify({ error: error?.message ?? "parse-error" }), {
+          status: 500,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+    }
+  }),
+});
+
+router.route({
+  path: "/api/report/generateAll",
+  method: "POST",
+  handler: httpAction(async (ctx, req) => {
+    try {
+      const body = await req.json();
+      const { tokenId, sections, context, force } = body ?? {};
+      if (!tokenId) {
+        return withCors(
+          new Response(JSON.stringify({ error: "Missing tokenId" }), {
+            status: 400,
+            headers: { "content-type": "application/json" },
+          }),
+        );
+      }
+      const result = await ctx.runAction(api.aiContent.generateSectionsForToken, {
+        tokenId,
+        sections,
+        context,
+        force,
+      });
+      return withCors(
+        new Response(JSON.stringify(result), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+    } catch (error: any) {
+      console.error("Error generating full report sections:", error);
+      return withCors(
+        new Response(JSON.stringify({ error: error?.message ?? "ai-section-error" }), {
+          status: 500,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+    }
+  }),
+});
+
+router.route({
   path: "/api/jsonld",
   method: "GET",
   handler: httpAction(async (ctx, req) => {
@@ -211,6 +347,33 @@ router.route({
 
     const fileUrl = await ctx.storage.getUrl(score.jsonldStorageId);
     return withCors(new Response(JSON.stringify({ url: fileUrl }), { status: 200, headers: { "content-type": "application/json" } }));
+  }),
+});
+
+router.route({
+  path: "/api/github",
+  method: "GET",
+  handler: httpAction(async (ctx, req) => {
+    const url = new URL(req.url);
+    const repoUrl = url.searchParams.get("repoUrl");
+    if (!repoUrl) return withCors(new Response("Missing repoUrl", { status: 400 }));
+    try {
+      const { getGitHubStats } = await import("./providers/github");
+      const stats = await getGitHubStats(repoUrl);
+      return withCors(
+        new Response(JSON.stringify(stats), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+    } catch (error: any) {
+      return withCors(
+        new Response(
+          JSON.stringify({ error: error?.message ?? "github-error" }),
+          { status: 500, headers: { "content-type": "application/json" } },
+        ),
+      );
+    }
   }),
 });
 

@@ -54,5 +54,11 @@ crons.cron(
   internal.schedulerActions.discoverOptimism
 );
 
+crons.cron(
+  "generate-ai-sections",
+  "0 3 * * *",  // Daily at 03:00 UTC
+  internal.aiContent.generateFeaturedSections
+);
+
 export default crons;
 
