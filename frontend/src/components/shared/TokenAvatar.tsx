@@ -1,3 +1,5 @@
+"use client";
+
 type Props = {
   avatar: string;
   symbol: string;

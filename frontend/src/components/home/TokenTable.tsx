@@ -109,9 +109,7 @@ const COLUMNS: ColumnConfig[] = [
   { label: "Asset", sortKey: "alphabetical" },
   { label: "Contract", sortKey: null },
   { label: "Benchmark", sortKey: "score" },
-  { label: "Liquidity", sortKey: "liquidity" },
   { label: "Holders", sortKey: "holders" },
-  { label: "24h volume", sortKey: "volume" },
   { label: "Risk", sortKey: "risk" },
   { label: "Updated", sortKey: "updated" },
   { label: "", sortKey: null },
@@ -255,12 +253,15 @@ function TokenTableView({
                       }}
                     />
                   </td>
-                  <td className="px-6 py-4 font-semibold text-white">
-                    {formatUsd(token.liquidityUsd, { notation: "compact" })}
-                  </td>
-                  <td className="px-6 py-4">{token.holders.toLocaleString()}</td>
                   <td className="px-6 py-4">
-                    {formatUsd(token.volume24hUsd, { notation: "compact" })}
+                    <div className="flex flex-col">
+                      <span className="font-semibold text-white">{token.holders.toLocaleString()}</span>
+                      {token.crossValidation?.status && (
+                        <span className="text-[10px] text-[color:var(--color-text-muted)] mt-0.5">
+                          {token.crossValidation.status}
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td className="px-6 py-4">
                     <RiskBadge level={token.risk} />
@@ -280,7 +281,7 @@ function TokenTableView({
                 </tr>
                 {isExpanded && (
                   <tr className="border-b border-white/[0.06]">
-                    <td colSpan={9} className="bg-white/[0.02] px-6 py-6">
+                    <td colSpan={7} className="bg-white/[0.02] px-6 py-6">
                       <ExpandedRow token={token} />
                     </td>
                   </tr>
@@ -329,7 +330,7 @@ function ExpandedRow({ token }: { token: TokenRecord }) {
       label: "Liquidity Quality",
       value: token.benchmarkDetails.liquidity >= 70 ? "Strong" : token.benchmarkDetails.liquidity >= 50 ? "Moderate" : "Weak",
       color: token.benchmarkDetails.liquidity >= 70 ? "#3fe081" : token.benchmarkDetails.liquidity >= 50 ? "#f7c548" : "#ff8a5c",
-      detail: `Score: ${token.benchmarkDetails.liquidity}/100 • ${formatUsd(token.liquidityUsd, { notation: "compact" })} depth`,
+      detail: `Score: ${token.benchmarkDetails.liquidity}/100`,
     },
   ];
 
@@ -517,15 +518,14 @@ function TokenGrid({ tokens }: { tokens: TokenRecord[] }) {
           <div className="mt-4 flex flex-wrap gap-4 text-sm text-white">
             <div>
               <p className="text-xs uppercase tracking-[0.35em] text-[color:var(--color-text-muted)]">
-                Liquidity
+                Holders
               </p>
-              <p>{formatUsd(token.liquidityUsd, { notation: "compact" })}</p>
-            </div>
-            <div>
-              <p className="text-xs uppercase tracking-[0.35em] text-[color:var(--color-text-muted)]">
-                24h Volume
-              </p>
-              <p>{formatUsd(token.volume24hUsd, { notation: "compact" })}</p>
+              <p>{token.holders.toLocaleString()}</p>
+              {token.crossValidation?.status && (
+                <p className="text-[10px] text-[color:var(--color-text-muted)] mt-0.5">
+                  {token.crossValidation.status}
+                </p>
+              )}
             </div>
             <div>
               <p className="text-xs uppercase tracking-[0.35em] text-[color:var(--color-text-muted)]">

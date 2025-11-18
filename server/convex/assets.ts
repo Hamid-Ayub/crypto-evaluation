@@ -41,6 +41,75 @@ export type TokenView = {
   tags: string[];
   sparkline: number[];
   stats: Array<{ label: string; value: string; delta: number }>;
+  // Market data (contextual research information)
+  marketData?: {
+    launch?: {
+      date?: number;
+      marketCapUsd?: number;
+      priceUsd?: number;
+      source?: string;
+      sourceUrl?: string;
+    };
+    current?: {
+      marketCapUsd?: number;
+      priceUsd?: number;
+      volume24hUsd?: number;
+      source?: string;
+      sourceUrl?: string;
+      updatedAt?: number;
+    };
+  };
+  // Cross-validation info
+  crossValidation?: {
+    sources?: string[];
+    status?: string; // e.g., "3 sources agree", "data conflict detected"
+  };
+  // Contract security information
+  contract?: {
+    verified: boolean;
+    upgradeable: boolean;
+    proxyType?: string;
+    implementation?: string;
+    proxyAdmin?: string;
+    owner?: string;
+    roles: Array<{ name: string; holder: string }>;
+    pausable: boolean;
+    timelock?: { address: string; delaySec: number };
+    asOfBlock: number;
+  };
+  // Detailed holders information
+  holdersDetail?: {
+    totalSupply: string;
+    freeFloat: string;
+    topHolders: Array<{ address: string; pct: number; label?: string }>;
+    top10Pct: number;
+    top1Pct?: number;
+    top3Pct?: number;
+    contractSharePct?: number;
+    eoaSharePct?: number;
+    coveragePct?: number;
+    sampleSize?: number;
+    asOfBlock: number;
+  };
+  // Detailed liquidity information
+  liquidityDetail?: {
+    pools: Array<{ dex: string; poolAddress: string; tvlUsd: number; sharePct: number }>;
+    cexSharePct?: number;
+    asOfBlock: number;
+  };
+  // Detailed governance information
+  governanceDetail?: {
+    framework?: string;
+    quorumPct?: number;
+    turnoutHistory: Array<{ proposalId: string; turnoutPct: number; ts: number }>;
+  };
+  // Audit information
+  audits?: Array<{
+    firm: string;
+    reportUrl: string;
+    date: number;
+    severitySummary?: string;
+  }>;
 };
 
 type TokenListSummary = {
@@ -307,7 +376,7 @@ function buildSummaryBlock(tokens: TokenView[]): TokenListSummary {
 }
 
 async function buildTokenView(ctx: any, asset: Doc<"assets">): Promise<TokenView | null> {
-  const [scoreHistory, holdersRows, liquidityRows, governanceRows] = await Promise.all([
+  const [scoreHistory, holdersRows, liquidityRows, governanceRows, marketDataRows, contractRows, auditRows] = await Promise.all([
     ctx.db
       .query("scores")
       .withIndex("by_asset_block", (q2: any) => q2.eq("assetId", asset._id))
@@ -328,6 +397,21 @@ async function buildTokenView(ctx: any, asset: Doc<"assets">): Promise<TokenView
       .withIndex("by_asset", (q2: any) => q2.eq("assetId", asset._id))
       .order("desc")
       .take(1),
+    ctx.db
+      .query("market_data")
+      .withIndex("by_asset", (q2: any) => q2.eq("assetId", asset._id))
+      .order("desc")
+      .take(1),
+    ctx.db
+      .query("contracts")
+      .withIndex("by_asset", (q2: any) => q2.eq("assetId", asset._id))
+      .order("desc")
+      .take(1),
+    ctx.db
+      .query("audits")
+      .withIndex("by_asset", (q2: any) => q2.eq("assetId", asset._id))
+      .order("desc")
+      .take(50),
   ]);
 
   const latestScore = scoreHistory[0] ?? null;
@@ -336,14 +420,19 @@ async function buildTokenView(ctx: any, asset: Doc<"assets">): Promise<TokenView
   const holders = holdersRows[0] ?? null;
   const liquidity = liquidityRows[0] ?? null;
   const governance = governanceRows[0] ?? null;
+  const marketData = marketDataRows[0] ?? null;
+  const contract = contractRows[0] ?? null;
+  const audits = auditRows ?? [];
 
   const chainMeta = getChainMeta(asset.chainId);
   const category = inferCategory(asset, chainMeta.defaultCategory);
   const benchmarkScore = Math.round(latestScore.total ?? 0);
   const risk = riskFromScore(benchmarkScore);
   const liquidityUsd = computeLiquidityUsd(liquidity);
-  const marketCapUsd = estimateMarketCap(liquidityUsd);
-  const volume24hUsd = estimateVolume(liquidityUsd, marketCapUsd);
+  
+  // Use market data from CoinGecko if available, otherwise estimate
+  const marketCapUsd = marketData?.marketCapUsd ?? estimateMarketCap(liquidityUsd);
+  const volume24hUsd = marketData?.volume24hUsd ?? estimateVolume(liquidityUsd, marketCapUsd);
   const holdersCount = estimateHolders(holders);
 
   const id = caip19(asset.chainId, asset.standard ?? "erc20", asset.address);
@@ -364,6 +453,82 @@ async function buildTokenView(ctx: any, asset: Doc<"assets">): Promise<TokenView
     // Use GitHub CDN URL if no storage ID
     avatarUrl = asset.iconUrl;
   }
+
+  // Build market data object (contextual research information)
+  const marketDataObj = marketData ? {
+    launch: marketData.launchDate || marketData.initialMarketCapUsd || marketData.initialPriceUsd ? {
+      date: marketData.launchDate,
+      marketCapUsd: marketData.initialMarketCapUsd,
+      priceUsd: marketData.initialPriceUsd,
+      source: marketData.launchSource,
+      sourceUrl: marketData.launchSourceUrl,
+    } : undefined,
+    current: marketData.marketCapUsd || marketData.priceUsd || marketData.volume24hUsd ? {
+      marketCapUsd: marketData.marketCapUsd,
+      priceUsd: marketData.priceUsd,
+      volume24hUsd: marketData.volume24hUsd,
+      source: marketData.currentSource,
+      sourceUrl: marketData.currentSourceUrl,
+      updatedAt: marketData.updatedAt,
+    } : undefined,
+  } : undefined;
+
+  // Build cross-validation info from holders data
+  const crossValidation = holders?.sources || holders?.crossValidationStatus ? {
+    sources: holders.sources,
+    status: holders.crossValidationStatus,
+  } : undefined;
+
+  // Build contract info
+  const contractInfo = contract ? {
+    verified: contract.verified,
+    upgradeable: contract.upgradeable,
+    proxyType: contract.proxyType,
+    implementation: contract.implementation,
+    proxyAdmin: contract.proxyAdmin,
+    owner: contract.owner,
+    roles: contract.roles,
+    pausable: contract.pausable,
+    timelock: contract.timelock,
+    asOfBlock: contract.asOfBlock,
+  } : undefined;
+
+  // Build detailed holders info
+  const holdersDetail = holders ? {
+    totalSupply: holders.totalSupply,
+    freeFloat: holders.freeFloat,
+    topHolders: holders.topHolders,
+    top10Pct: holders.top10Pct,
+    top1Pct: holders.top1Pct,
+    top3Pct: holders.top3Pct,
+    contractSharePct: holders.contractSharePct,
+    eoaSharePct: holders.eoaSharePct,
+    coveragePct: holders.coveragePct,
+    sampleSize: holders.sampleSize,
+    asOfBlock: holders.asOfBlock,
+  } : undefined;
+
+  // Build detailed liquidity info
+  const liquidityDetail = liquidity ? {
+    pools: liquidity.pools,
+    cexSharePct: liquidity.cexSharePct,
+    asOfBlock: liquidity.asOfBlock,
+  } : undefined;
+
+  // Build detailed governance info
+  const governanceDetail = governance ? {
+    framework: governance.framework,
+    quorumPct: governance.quorumPct,
+    turnoutHistory: governance.turnoutHistory,
+  } : undefined;
+
+  // Build audits info
+  const auditsInfo = audits.length > 0 ? audits.map(audit => ({
+    firm: audit.firm,
+    reportUrl: audit.reportUrl,
+    date: audit.date,
+    severitySummary: audit.severitySummary,
+  })) : undefined;
 
   return {
     id,
@@ -386,6 +551,13 @@ async function buildTokenView(ctx: any, asset: Doc<"assets">): Promise<TokenView
     tags: buildTags(chainMeta.short, risk, liquidityUsd, governance),
     sparkline: buildSparkline(scoreHistory),
     stats: buildStats(latestScore, scoreHistory[1], liquidityUsd),
+    marketData: marketDataObj,
+    crossValidation,
+    contract: contractInfo,
+    holdersDetail,
+    liquidityDetail,
+    governanceDetail,
+    audits: auditsInfo,
   };
 }
 
@@ -678,6 +850,14 @@ export const latestLiquidity = query({
   },
 });
 
+export const marketDataByAsset = query({
+  args: { assetId: v.id("assets") },
+  handler: async (ctx, { assetId }) => {
+    const rows = await ctx.db.query("market_data").withIndex("by_asset", q => q.eq("assetId", assetId)).order("desc").take(1);
+    return rows[0] ?? null;
+  },
+});
+
 export const governanceByAsset = query({
   args: { assetId: v.id("assets") },
   handler: async (ctx, { assetId }) => {
@@ -763,6 +943,8 @@ export const insertHolders = internalMutation({
     coveragePct: v.optional(v.number()),
     sampleSize: v.optional(v.number()),
     source: v.optional(v.string()),
+    sources: v.optional(v.array(v.string())), // Multi-source tracking
+    crossValidationStatus: v.optional(v.string()), // Cross-validation status
     // Token metadata fields (not stored in holders_snapshot table, just passed through)
     symbol: v.optional(v.string()),
     name: v.optional(v.string()),
@@ -814,6 +996,41 @@ export const upsertChainStats = internalMutation({
     const existing = await ctx.db.query("chain_stats").withIndex("by_chain", q => q.eq("chainId", chainId)).order("desc").take(1);
     if (existing[0]) { await ctx.db.patch(existing[0]._id, { ...data, updatedAt: now }); return existing[0]._id; }
     return await ctx.db.insert("chain_stats", { chainId, ...data, updatedAt: now });
+  },
+});
+
+export const upsertMarketData = internalMutation({
+  args: { 
+    assetId: v.id("assets"), 
+    data: v.object({
+      launchDate: v.optional(v.number()),
+      initialMarketCapUsd: v.optional(v.number()),
+      initialPriceUsd: v.optional(v.number()),
+      launchSource: v.optional(v.string()),
+      launchSourceUrl: v.optional(v.string()),
+      marketCapUsd: v.optional(v.number()),
+      priceUsd: v.optional(v.number()),
+      volume24hUsd: v.optional(v.number()),
+      currentSource: v.optional(v.string()),
+      currentSourceUrl: v.optional(v.string()),
+    })
+  },
+  handler: async (ctx, { assetId, data }) => {
+    const now = Date.now();
+    const existing = await ctx.db.query("market_data").withIndex("by_asset", q => q.eq("assetId", assetId)).order("desc").take(1);
+    if (existing[0]) { 
+      await ctx.db.patch(existing[0]._id, { 
+        ...data, 
+        updatedAt: now 
+      }); 
+      return existing[0]._id; 
+    }
+    return await ctx.db.insert("market_data", { 
+      assetId, 
+      ...data, 
+      createdAt: now, 
+      updatedAt: now 
+    });
   },
 });
 
@@ -908,6 +1125,34 @@ export const materializeJsonLd = internalAction({
 });
 
 // Get assets that haven't been synced to GitHub yet
+export const getExistingByChainAddress = internalQuery({
+  args: {
+    chainAddresses: v.array(v.object({
+      chainId: v.string(),
+      address: v.string(),
+    })),
+  },
+  handler: async (ctx, { chainAddresses }) => {
+    const results: Array<{ chainId: string; address: string }> = [];
+    
+    for (const { chainId, address } of chainAddresses) {
+      const normalizedAddress = address.toLowerCase();
+      const asset = await ctx.db
+        .query("assets")
+        .withIndex("by_chain_address", q => 
+          q.eq("chainId", chainId).eq("address", normalizedAddress)
+        )
+        .unique();
+      
+      if (asset) {
+        results.push({ chainId, address: normalizedAddress });
+      }
+    }
+    
+    return results;
+  },
+});
+
 export const getUnsyncedAssets = internalQuery({
   handler: async (ctx) => {
     return await ctx.db

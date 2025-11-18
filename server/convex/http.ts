@@ -5,24 +5,68 @@ import { analyzeContract, liquidityForToken, governanceForToken } from "./provid
 
 const router = httpRouter();
 
+// CORS headers helper
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization",
+  "Access-Control-Max-Age": "86400",
+};
+
+// Helper to add CORS headers to response
+function withCors(response: Response): Response {
+  const newHeaders = new Headers(response.headers);
+  Object.entries(corsHeaders).forEach(([key, value]) => {
+    newHeaders.set(key, value);
+  });
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: newHeaders,
+  });
+}
+
+// Handle OPTIONS preflight requests for POST endpoints
+const postEndpoints = [
+  "/api/refresh",
+  "/api/refreshNow",
+  "/api/scheduler/start",
+  "/api/scheduler/pause",
+  "/api/scheduler/discover",
+  "/api/jobs/process",
+];
+
+for (const path of postEndpoints) {
+  router.route({
+    path,
+    method: "OPTIONS",
+    handler: httpAction(async () => {
+      return new Response(null, {
+        status: 204,
+        headers: corsHeaders,
+      });
+    }),
+  });
+}
+
 router.route({
   path: "/api/score",
   method: "GET",
   handler: httpAction(async (ctx, req) => {
     const ip = req.headers.get("x-forwarded-for") ?? "anon";
     const rate = await ctx.runMutation(api.rateLimit.checkAndIncrement, { key: `ip:${ip}`, plan: "free" });
-    if (!rate.ok) return new Response("Too many requests", { status: 429 });
+    if (!rate.ok) return withCors(new Response("Too many requests", { status: 429 }));
 
     const url = new URL(req.url);
     const chainId = url.searchParams.get("chainId");
     const address = url.searchParams.get("address");
-    if (!chainId || !address) return new Response("Missing params", { status: 400 });
+    if (!chainId || !address) return withCors(new Response("Missing params", { status: 400 }));
 
     const asset = await ctx.runQuery(api.assets.getByChainAddress, { chainId, address });
-    if (!asset) return new Response("Not found", { status: 404 });
+    if (!asset) return withCors(new Response("Not found", { status: 404 }));
 
     const score = await ctx.runQuery(api.assets.scorecard, { assetId: asset._id });
-    return new Response(JSON.stringify({ asset, score }), { status: 200, headers: { "content-type": "application/json" } });
+    return withCors(new Response(JSON.stringify({ asset, score }), { status: 200, headers: { "content-type": "application/json" } }));
   }),
 });
 
@@ -42,10 +86,10 @@ router.route({
       page: page ?? undefined,
       pageSize: pageSize ?? undefined,
     });
-    return new Response(JSON.stringify(result), {
+    return withCors(new Response(JSON.stringify(result), {
       status: 200,
       headers: { "content-type": "application/json" },
-    });
+    }));
   }),
 });
 
@@ -71,14 +115,14 @@ router.route({
       }
     }
     
-    if (!tokenId) return new Response("Missing id or address", { status: 400 });
+    if (!tokenId) return withCors(new Response("Missing id or address", { status: 400 }));
     
     const token = await ctx.runQuery(api.assets.getEnriched, { tokenId });
-    if (!token) return new Response("Not found", { status: 404 });
-    return new Response(JSON.stringify(token), {
+    if (!token) return withCors(new Response("Not found", { status: 404 }));
+    return withCors(new Response(JSON.stringify(token), {
       status: 200,
       headers: { "content-type": "application/json" },
-    });
+    }));
   }),
 });
 
@@ -90,19 +134,19 @@ router.route({
       const ip = req.headers.get("x-forwarded-for") ?? "anon";
       const rate = await ctx.runMutation(api.rateLimit.checkAndIncrement, { key: `ip:${ip}`, plan: "free" });
       if (!rate.ok) {
-        return new Response(JSON.stringify({ error: "Too many requests" }), { 
+        return withCors(new Response(JSON.stringify({ error: "Too many requests" }), { 
           status: 429, 
           headers: { "content-type": "application/json" } 
-        });
+        }));
       }
 
       const body = await req.json();
       const { chainId, address } = body || {};
       if (!chainId || !address) {
-        return new Response(JSON.stringify({ error: "Missing chainId or address" }), { 
+        return withCors(new Response(JSON.stringify({ error: "Missing chainId or address" }), { 
           status: 400, 
           headers: { "content-type": "application/json" } 
-        });
+        }));
       }
 
       // Normalize address
@@ -124,28 +168,28 @@ router.route({
         asset = await ctx.runQuery(api.assets.getAssetInternal, { assetId });
         
         if (!asset) {
-          return new Response(JSON.stringify({ error: "Failed to create asset" }), { 
+          return withCors(new Response(JSON.stringify({ error: "Failed to create asset" }), { 
             status: 500, 
             headers: { "content-type": "application/json" } 
-          });
+          }));
         }
       }
       
       // Queue refresh job
       await ctx.runMutation(api.assets.requestRefresh, { assetId: asset._id });
       
-      return new Response(JSON.stringify({ enqueued: true }), { 
+      return withCors(new Response(JSON.stringify({ enqueued: true }), { 
         status: 200, 
         headers: { "content-type": "application/json" } 
-      });
+      }));
     } catch (error) {
       console.error("Error in /api/refresh:", error);
-      return new Response(JSON.stringify({ 
+      return withCors(new Response(JSON.stringify({ 
         error: error instanceof Error ? error.message : "Internal server error" 
       }), { 
         status: 500, 
         headers: { "content-type": "application/json" } 
-      });
+      }));
     }
   }),
 });
@@ -157,16 +201,16 @@ router.route({
     const url = new URL(req.url);
     const chainId = url.searchParams.get("chainId");
     const address = url.searchParams.get("address");
-    if (!chainId || !address) return new Response("Missing params", { status: 400 });
+    if (!chainId || !address) return withCors(new Response("Missing params", { status: 400 }));
 
     const asset = await ctx.runQuery(api.assets.getByChainAddress, { chainId, address });
-    if (!asset) return new Response("Not found", { status: 404 });
+    if (!asset) return withCors(new Response("Not found", { status: 404 }));
 
     const score = await ctx.runQuery(api.assets.scorecard, { assetId: asset._id });
-    if (!score?.jsonldStorageId) return new Response("No JSON-LD", { status: 404 });
+    if (!score?.jsonldStorageId) return withCors(new Response("No JSON-LD", { status: 404 }));
 
     const fileUrl = await ctx.storage.getUrl(score.jsonldStorageId);
-    return new Response(JSON.stringify({ url: fileUrl }), { status: 200, headers: { "content-type": "application/json" } });
+    return withCors(new Response(JSON.stringify({ url: fileUrl }), { status: 200, headers: { "content-type": "application/json" } }));
   }),
 });
 
@@ -178,12 +222,12 @@ router.route({
     const url = new URL(req.url);
     const chainId = Number(url.searchParams.get("chainId"));
     const address = String(url.searchParams.get("address"));
-    if (!chainId || !address) return new Response("Missing params", { status: 400 });
+    if (!chainId || !address) return withCors(new Response("Missing params", { status: 400 }));
     try {
       const data = await analyzeContract(chainId, address as any);
-      return new Response(JSON.stringify(data), { status: 200, headers: { "content-type": "application/json" } });
+      return withCors(new Response(JSON.stringify(data), { status: 200, headers: { "content-type": "application/json" } }));
     } catch (e:any) {
-      return new Response(JSON.stringify({ error: e?.message || "introspection-failed" }), { status: 500 });
+      return withCors(new Response(JSON.stringify({ error: e?.message || "introspection-failed" }), { status: 500 }));
     }
   }),
 });
@@ -196,12 +240,12 @@ router.route({
     const url = new URL(req.url);
     const chainName = String(url.searchParams.get("chainName") || "");
     const token = String(url.searchParams.get("token") || "");
-    if (!chainName || !token) return new Response("Missing params", { status: 400 });
+    if (!chainName || !token) return withCors(new Response("Missing params", { status: 400 }));
     try {
       const data = await liquidityForToken(chainName, token);
-      return new Response(JSON.stringify(data), { status: 200, headers: { "content-type": "application/json" } });
+      return withCors(new Response(JSON.stringify(data), { status: 200, headers: { "content-type": "application/json" } }));
     } catch (e:any) {
-      return new Response(JSON.stringify({ error: e?.message || "liquidity-failed" }), { status: 500 });
+      return withCors(new Response(JSON.stringify({ error: e?.message || "liquidity-failed" }), { status: 500 }));
     }
   }),
 });
@@ -214,12 +258,12 @@ router.route({
     const url = new URL(req.url);
     const chainId = Number(url.searchParams.get("chainId"));
     const token = String(url.searchParams.get("token") || "");
-    if (!chainId || !token) return new Response("Missing params", { status: 400 });
+    if (!chainId || !token) return withCors(new Response("Missing params", { status: 400 }));
     try {
       const data = await governanceForToken(chainId, token);
-      return new Response(JSON.stringify(data), { status: 200, headers: { "content-type": "application/json" } });
+      return withCors(new Response(JSON.stringify(data), { status: 200, headers: { "content-type": "application/json" } }));
     } catch (e:any) {
-      return new Response(JSON.stringify({ error: e?.message || "governance-failed" }), { status: 500 });
+      return withCors(new Response(JSON.stringify({ error: e?.message || "governance-failed" }), { status: 500 }));
     }
   }),
 });
@@ -231,11 +275,11 @@ router.route({
   handler: httpAction(async (ctx, req) => {
     const ip = req.headers.get("x-forwarded-for") ?? "anon";
     const rate = await ctx.runMutation(api.rateLimit.checkAndIncrement, { key: `ip:${ip}`, plan: "free" });
-    if (!rate.ok) return new Response("Too many requests", { status: 429 });
+    if (!rate.ok) return withCors(new Response("Too many requests", { status: 429 }));
 
     const body = await req.json();
     const { chainId, address, standard, symbol, name, decimals } = body || {};
-    if (!chainId || !address) return new Response("Bad request", { status: 400 });
+    if (!chainId || !address) return withCors(new Response("Bad request", { status: 400 }));
 
     // Ensure asset exists (or upsert minimal metadata)
     const assetId = await ctx.runMutation(internal.assets.ensureAsset, {
@@ -261,7 +305,7 @@ router.route({
     // Note: GitHub workflow trigger removed - assets are now downloaded directly to Convex
     // and synced to GitHub via scheduled cron every 15 minutes
 
-    return new Response(JSON.stringify({ ok: true, assetId, ...result }), { status: 200, headers: { "content-type": "application/json" } });
+    return withCors(new Response(JSON.stringify({ ok: true, assetId, ...result }), { status: 200, headers: { "content-type": "application/json" } }));
   }),
 });
 
@@ -271,7 +315,7 @@ router.route({
   method: "GET",
   handler: httpAction(async (ctx, req) => {
     const stats = await ctx.runQuery(api.jobs.getJobStats, {});
-    return new Response(JSON.stringify(stats), { status: 200, headers: { "content-type": "application/json" } });
+    return withCors(new Response(JSON.stringify(stats), { status: 200, headers: { "content-type": "application/json" } }));
   }),
 });
 
@@ -281,7 +325,48 @@ router.route({
   method: "POST",
   handler: httpAction(async (ctx, req) => {
     const result = await ctx.runAction(internal.jobs.processQueue, {});
-    return new Response(JSON.stringify(result), { status: 200, headers: { "content-type": "application/json" } });
+    return withCors(new Response(JSON.stringify(result), { status: 200, headers: { "content-type": "application/json" } }));
+  }),
+});
+
+// Scheduler control endpoints
+router.route({
+  path: "/api/scheduler/status",
+  method: "GET",
+  handler: httpAction(async (ctx, req) => {
+    const config = await ctx.runQuery(api.scheduler.getSchedulerConfig, {});
+    return withCors(new Response(JSON.stringify(config), { status: 200, headers: { "content-type": "application/json" } }));
+  }),
+});
+
+router.route({
+  path: "/api/scheduler/start",
+  method: "POST",
+  handler: httpAction(async (ctx, req) => {
+    const result = await ctx.runMutation(api.scheduler.enable, {});
+    return withCors(new Response(JSON.stringify(result), { status: 200, headers: { "content-type": "application/json" } }));
+  }),
+});
+
+router.route({
+  path: "/api/scheduler/pause",
+  method: "POST",
+  handler: httpAction(async (ctx, req) => {
+    const result = await ctx.runMutation(api.scheduler.disable, {});
+    return withCors(new Response(JSON.stringify(result), { status: 200, headers: { "content-type": "application/json" } }));
+  }),
+});
+
+// Manual trigger for token discovery (bypasses cron, for testing)
+router.route({
+  path: "/api/scheduler/discover",
+  method: "POST",
+  handler: httpAction(async (ctx, req) => {
+    const body = await req.json().catch(() => ({}));
+    const chain = body.chain || "ethereum";
+    
+    const result = await ctx.runAction(internal.schedulerActions.discoverAndQueueTokens, { chain });
+    return withCors(new Response(JSON.stringify(result), { status: 200, headers: { "content-type": "application/json" } }));
   }),
 });
 

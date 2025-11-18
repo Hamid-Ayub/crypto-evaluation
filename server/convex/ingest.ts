@@ -63,6 +63,18 @@ export const ingestAssetSnapshot = action({
       settle(adapter.getAudits ? adapter.getAudits(chainId, address) : Promise.resolve([] as any)),
     ]);
 
+    // Fetch market data (launch + current snapshot) from CoinGecko
+    const [launchData, currentData] = await Promise.all([
+      settle((async () => {
+        const { fetchLaunchMarketData } = await import("./providers/coingecko");
+        return fetchLaunchMarketData(chainId, address);
+      })()),
+      settle((async () => {
+        const { fetchCurrentMarketData } = await import("./providers/coingecko");
+        return fetchCurrentMarketData(chainId, address);
+      })()),
+    ]);
+
     // Extract metadata from holders snapshot if available
     const metadata = h.ok ? {
       symbol: args.symbol ?? h.v.symbol,
@@ -121,6 +133,29 @@ export const ingestAssetSnapshot = action({
     if (cs.ok) await ctx.runMutation(internal.assets.upsertChainStats, { chainId, data: cs.v });
     if (au.ok && Array.isArray(au.v)) {
       for (const a of au.v) await ctx.runMutation(internal.assets.insertAudit, { assetId, firm: a.firm, reportUrl: a.reportUrl, date: a.date, severitySummary: a.severitySummary });
+    }
+
+    // Store market data (launch + current snapshot)
+    if ((launchData.ok && launchData.v) || (currentData.ok && currentData.v)) {
+      await ctx.runMutation(internal.assets.upsertMarketData, {
+        assetId,
+        data: {
+          ...(launchData.ok && launchData.v ? {
+            launchDate: launchData.v.launchDate,
+            initialMarketCapUsd: launchData.v.initialMarketCapUsd,
+            initialPriceUsd: launchData.v.initialPriceUsd,
+            launchSource: launchData.v.source,
+            launchSourceUrl: launchData.v.sourceUrl,
+          } : {}),
+          ...(currentData.ok && currentData.v ? {
+            marketCapUsd: currentData.v.marketCapUsd,
+            priceUsd: currentData.v.priceUsd,
+            volume24hUsd: currentData.v.volume24hUsd,
+            currentSource: currentData.v.source,
+            currentSourceUrl: currentData.v.sourceUrl,
+          } : {}),
+        },
+      });
     }
 
     const asOfBlock = Math.max(c.ok ? c.v.asOfBlock : 0, h.ok ? h.v.asOfBlock : 0, l.ok ? l.v.asOfBlock : 0);

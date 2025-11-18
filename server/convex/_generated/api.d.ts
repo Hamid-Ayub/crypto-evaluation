@@ -24,10 +24,13 @@ import type * as ingest from "../ingest.js";
 import type * as jobs from "../jobs.js";
 import type * as providers_chainStats from "../providers/chainStats.js";
 import type * as providers_chains from "../providers/chains.js";
+import type * as providers_coingecko from "../providers/coingecko.js";
 import type * as providers_composite from "../providers/composite.js";
+import type * as providers_covalent from "../providers/covalent.js";
 import type * as providers_defillama from "../providers/defillama.js";
 import type * as providers_governance from "../providers/governance.js";
 import type * as providers_holders from "../providers/holders.js";
+import type * as providers_holdersMultiSource from "../providers/holdersMultiSource.js";
 import type * as providers_index from "../providers/index.js";
 import type * as providers_legacy_covalent from "../providers/legacy_covalent.js";
 import type * as providers_legacy_defillama from "../providers/legacy_defillama.js";
@@ -40,6 +43,10 @@ import type * as providers_snapshot from "../providers/snapshot.js";
 import type * as providers_tally from "../providers/tally.js";
 import type * as providers_types from "../providers/types.js";
 import type * as rateLimit from "../rateLimit.js";
+import type * as scheduler from "../scheduler.js";
+import type * as schedulerActions from "../schedulerActions.js";
+import type * as tokenDiscovery from "../tokenDiscovery.js";
+import type * as tokenDiscoveryFallbacks from "../tokenDiscoveryFallbacks.js";
 
 import type {
   ApiFromModules,
@@ -72,10 +79,13 @@ declare const fullApi: ApiFromModules<{
   jobs: typeof jobs;
   "providers/chainStats": typeof providers_chainStats;
   "providers/chains": typeof providers_chains;
+  "providers/coingecko": typeof providers_coingecko;
   "providers/composite": typeof providers_composite;
+  "providers/covalent": typeof providers_covalent;
   "providers/defillama": typeof providers_defillama;
   "providers/governance": typeof providers_governance;
   "providers/holders": typeof providers_holders;
+  "providers/holdersMultiSource": typeof providers_holdersMultiSource;
   "providers/index": typeof providers_index;
   "providers/legacy_covalent": typeof providers_legacy_covalent;
   "providers/legacy_defillama": typeof providers_legacy_defillama;
@@ -88,6 +98,10 @@ declare const fullApi: ApiFromModules<{
   "providers/tally": typeof providers_tally;
   "providers/types": typeof providers_types;
   rateLimit: typeof rateLimit;
+  scheduler: typeof scheduler;
+  schedulerActions: typeof schedulerActions;
+  tokenDiscovery: typeof tokenDiscovery;
+  tokenDiscoveryFallbacks: typeof tokenDiscoveryFallbacks;
 }>;
 declare const fullApiWithMounts: typeof fullApi;
 

@@ -19,7 +19,6 @@ export default function OverviewCards({ tokens, lastLookup }: Props) {
       ? liquidityValues[Math.floor(liquidityValues.length / 2)]
       : 0;
   const totalLiquidity = tokens.reduce((sum, token) => sum + token.liquidityUsd, 0);
-  const totalVolume = tokens.reduce((sum, token) => sum + token.volume24hUsd, 0);
   const totalHolders = tokens.reduce((sum, token) => sum + token.holders, 0);
   const avgGini = tokens.length > 0
     ? tokens.reduce((sum, token) => sum + token.benchmarkDetails.gini, 0) / tokens.length
@@ -49,9 +48,9 @@ export default function OverviewCards({ tokens, lastLookup }: Props) {
       icon: <Gauge className="h-5 w-5 text-[#3fe081]" />,
     },
     {
-      label: "Total liquidity",
+      label: "Total DEX liquidity",
       value: formatUsd(totalLiquidity, { notation: "compact" }),
-      subLabel: `${formatUsd(totalVolume, { notation: "compact" })} 24h volume`,
+      subLabel: "Across all DEX pools",
       icon: <ShieldCheck className="h-5 w-5 text-[#f7c548]" />,
     },
     {
@@ -89,7 +88,7 @@ export default function OverviewCards({ tokens, lastLookup }: Props) {
       {topLiquidity.length > 0 && (
         <div className="rounded-xl border border-white/5 bg-white/[0.02] p-4">
           <p className="text-xs uppercase tracking-[0.35em] text-[color:var(--color-text-muted)] mb-3">
-            Top liquidity assets
+            Top DEX liquidity assets
           </p>
           <div className="grid gap-3 sm:grid-cols-3">
             {topLiquidity.map((token) => (

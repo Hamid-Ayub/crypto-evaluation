@@ -65,8 +65,28 @@ export default defineSchema({
     coveragePct: v.optional(v.number()),
     sampleSize: v.optional(v.number()),
     source: v.optional(v.string()),
+    sources: v.optional(v.array(v.string())), // Multiple sources for cross-validation
+    crossValidationStatus: v.optional(v.string()), // e.g., "3 sources agree", "data conflict"
     createdAt: v.number(),
   }).index("by_asset_block", ["assetId", "asOfBlock"]),
+
+  market_data: defineTable({
+    assetId: v.id("assets"),
+    // Launch data (historical)
+    launchDate: v.optional(v.number()), // Unix timestamp
+    initialMarketCapUsd: v.optional(v.number()),
+    initialPriceUsd: v.optional(v.number()),
+    launchSource: v.optional(v.string()),
+    launchSourceUrl: v.optional(v.string()),
+    // Current snapshot
+    marketCapUsd: v.optional(v.number()),
+    priceUsd: v.optional(v.number()),
+    volume24hUsd: v.optional(v.number()),
+    currentSource: v.optional(v.string()),
+    currentSourceUrl: v.optional(v.string()),
+    updatedAt: v.number(),
+    createdAt: v.number(),
+  }).index("by_asset", ["assetId"]),
 
   liquidity: defineTable({
     assetId: v.id("assets"),
@@ -161,5 +181,29 @@ export default defineSchema({
     windowMs: v.number(),
     updatedAt: v.number(),
   }).index("by_key", ["key"]),
+
+  scheduler_config: defineTable({
+    enabled: v.boolean(),
+    tokensPerHour: v.number(),
+    lastRunTime: v.optional(v.number()),
+    lastRunChain: v.optional(v.string()),
+    stats: v.object({
+      totalDiscovered: v.number(),
+      totalQueued: v.number(),
+      errorsByChain: v.optional(v.any()),
+      errorsByProvider: v.optional(v.any()),
+      lastError: v.optional(v.string()),
+      lastErrorTime: v.optional(v.number()),
+    }),
+    chainConfig: v.optional(v.object({
+      ethereum: v.object({ enabled: v.boolean(), tokensPerHour: v.number(), minute: v.number() }),
+      arbitrum: v.object({ enabled: v.boolean(), tokensPerHour: v.number(), minute: v.number() }),
+      base: v.object({ enabled: v.boolean(), tokensPerHour: v.number(), minute: v.number() }),
+      polygon: v.object({ enabled: v.boolean(), tokensPerHour: v.number(), minute: v.number() }),
+      optimism: v.object({ enabled: v.boolean(), tokensPerHour: v.number(), minute: v.number() }),
+    })),
+    updatedAt: v.number(),
+    createdAt: v.number(),
+  }).index("by_enabled", ["enabled"]),
 });
 
