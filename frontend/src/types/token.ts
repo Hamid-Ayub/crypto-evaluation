@@ -122,6 +122,8 @@ export type TokenRecord = {
   liquidityUsd: number;
   holders: number;
   volume24hUsd: number;
+  priceUsd: number;
+  priceChange24h?: number;
   summary: string;
   updatedAt: string;
   tags: string[];

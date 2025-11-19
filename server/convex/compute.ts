@@ -54,13 +54,13 @@ function calculateOwnership(holders: any): number {
   // Weighted combination to blend concentration, diversity, and data depth
   return clamp(
     top10Score * 0.20 +
-      hhiScore * 0.15 +
-      nakamotoScore * 0.15 +
-      giniScore * 0.15 +
-      top1Score * 0.10 +
-      top3Score * 0.10 +
-      contractScore * 0.10 +
-      coverageScore * 0.05
+    hhiScore * 0.15 +
+    nakamotoScore * 0.15 +
+    giniScore * 0.15 +
+    top1Score * 0.10 +
+    top3Score * 0.10 +
+    contractScore * 0.10 +
+    coverageScore * 0.05
   );
 }
 
@@ -70,7 +70,7 @@ function calculateOwnership(holders: any): number {
  */
 function isLikelyMultisig(contracts: any): boolean {
   if (!contracts?.roles || contracts.roles.length === 0) return false;
-  
+
   // Group roles by holder address
   const holderCounts = new Map<string, number>();
   for (const role of contracts.roles) {
@@ -79,11 +79,11 @@ function isLikelyMultisig(contracts: any): boolean {
   }
 
   // If we have multiple distinct holders for admin roles, likely multisig
-  const adminRoles = contracts.roles.filter((r: any) => 
+  const adminRoles = contracts.roles.filter((r: any) =>
     r.name.includes("ADMIN") || r.name.includes("OWNER")
   );
   const uniqueAdminHolders = new Set(adminRoles.map((r: any) => r.holder.toLowerCase()));
-  
+
   return uniqueAdminHolders.size >= 2;
 }
 
@@ -103,7 +103,7 @@ function calculateControlRisk(contracts: any): number {
   // Admin presence: penalize centralized control, reward multisig/DAO
   const adminEntity = (contracts.proxyAdmin ?? contracts.owner ?? "").toLowerCase();
   const hasAdmin = adminEntity.startsWith("0x") && !adminEntity.startsWith("0x000000000000000000000000000000000000");
-  
+
   if (hasAdmin) {
     // Check if likely multisig/DAO
     if (isLikelyMultisig(contracts)) {
@@ -215,7 +215,7 @@ function calculateChainLevel(chain: any): number {
   if (!chain?.nakamotoCoeff) return 55; // Slightly above neutral default
 
   const nakamoto = chain.nakamotoCoeff;
-  
+
   // Normalize Nakamoto coefficient to 0-100 scale
   // Typical ranges: Bitcoin ~10,000, Ethereum ~30, smaller chains ~5-50
   // For scoring: >= 20 is excellent (100), >= 10 is good (80), >= 5 is fair (60), < 5 is poor
@@ -246,7 +246,7 @@ function calculateCodeAssurance(contracts: any, audits: any[]): number {
     // Recent audits (within 2 years) are more valuable
     const now = Date.now();
     const twoYearsAgo = now - (2 * 365 * 24 * 60 * 60 * 1000);
-    
+
     const recentAudits = audits.filter(a => a.date * 1000 >= twoYearsAgo);
     const auditCount = audits.length;
     const recentCount = recentAudits.length;
@@ -272,13 +272,14 @@ export const computeAndStore = internalAction({
     const asset = await ctx.runQuery(api.assets.getAssetInternal, { assetId });
     if (!asset) throw new Error("Asset not found");
 
-    const [holders, contracts, liq, gov, chain, audits] = await Promise.all([
+    const [holders, contracts, liq, gov, chain, audits, config] = await Promise.all([
       ctx.runQuery(api.assets.latestHolders, { assetId }),
       ctx.runQuery(api.assets.latestContract, { assetId }),
       ctx.runQuery(api.assets.latestLiquidity, { assetId }),
       ctx.runQuery(api.assets.governanceByAsset, { assetId }),
       ctx.runQuery(api.assets.chainStatsByChainId, { chainId: asset.chainId }),
       ctx.runQuery(api.assets.auditsByAsset, { assetId }),
+      ctx.runQuery(api.scoring_config.get, {}),
     ]);
 
     const ownership = calculateOwnership(holders);
@@ -290,7 +291,7 @@ export const computeAndStore = internalAction({
 
     const sub: SubScores = { ownership, controlRisk, liquidity, governance, chainLevel, codeAssurance };
     const confidence = buildConfidenceMap(holders, contracts, liq, gov, chain, audits);
-    const { total, weights } = totalScore(sub, { confidence });
+    const { total, weights } = totalScore(sub, { confidence, weights: config });
 
     const scoreId = await ctx.runMutation(internal.assets.insertScore, { assetId, asOfBlock, subScores: sub, total, weights, confidence });
     const jsonld = await ctx.runAction(internal.assets.materializeJsonLd, { assetId, scoreId });

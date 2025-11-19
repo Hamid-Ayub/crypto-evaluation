@@ -48,6 +48,23 @@ export const discoverAndQueueTokens = internalAction({
 
     const tokensPerHour = chainConfig.tokensPerHour;
 
+    // Check if there are already queued jobs - if so, skip discovery
+    // This prevents wasting API calls when we're already at capacity
+    const queuedJobs = await ctx.runQuery(internal.jobs.listQueued, {});
+    const queuedCount = queuedJobs.length;
+
+    if (queuedCount > 0) {
+      console.log(`Skipping discovery for ${chain}: ${queuedCount} jobs already queued`);
+      return {
+        success: false,
+        reason: "queue_backlog",
+        chain,
+        discovered: 0,
+        queued: 0,
+        queuedCount,
+      };
+    }
+
     try {
       // Step 1: Discover tokens using multi-source with fallbacks
       // This tries CoinGecko first, then DeFiLlama, then token lists
@@ -116,11 +133,22 @@ export const discoverAndQueueTokens = internalAction({
             status: "pending",
           });
 
-          // Queue refresh job
+          // Calculate priority based on market cap
+          // High value: >$10M = 100, Medium: $1M-$10M = 50, Low: <$1M = 10
+          const marketCap = token.marketCapUsd || 0;
+          let priority = 10; // Default low
+          if (marketCap >= 10_000_000) {
+            priority = 100; // High value
+          } else if (marketCap >= 1_000_000) {
+            priority = 50; // Medium value
+          }
+
+          // Queue refresh job with priority
           await ctx.runMutation(internal.jobs.insertJob, {
             type: "refresh_asset",
             params: { assetId },
             status: "queued",
+            priority,
             createdAt: now,
             updatedAt: now,
           });
@@ -151,7 +179,7 @@ export const discoverAndQueueTokens = internalAction({
       };
     } catch (error: any) {
       console.error(`Scheduler error for ${chain}:`, error);
-      
+
       await ctx.runMutation(internal.scheduler.updateStats, {
         error: error.message || "Unknown error",
         errorChain: chain,

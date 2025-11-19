@@ -6,6 +6,7 @@ const COINGECKO_KEY = process.env.COINGECKO_API_KEY ?? "";
 export type MarketDataSnapshot = {
   marketCapUsd: number;
   priceUsd: number;
+  priceChange24h?: number;
   volume24hUsd: number;
   timestamp: number;
   source: string;
@@ -43,6 +44,7 @@ type CoinGeckoCoin = {
     current_price?: { usd?: number };
     market_cap?: { usd?: number };
     total_volume?: { usd?: number };
+    price_change_percentage_24h?: number;
   };
   genesis_date?: string; // ISO date string
   ico?: {
@@ -114,8 +116,8 @@ async function findCoinId(chainId: string | number, address: string): Promise<st
       100: "xdai",
     };
 
-    const numericChain = typeof chainId === "number" 
-      ? chainId 
+    const numericChain = typeof chainId === "number"
+      ? chainId
       : parseInt(chainId.replace("eip155:", ""));
 
     const platform = platformMap[numericChain];
@@ -157,7 +159,7 @@ export async function fetchCurrentMarketData(
       developer_data: "false",
       sparkline: "false",
     });
-    
+
     if (COINGECKO_KEY) {
       params.set("x_cg_demo_api_key", COINGECKO_KEY);
     }
@@ -170,12 +172,14 @@ export async function fetchCurrentMarketData(
     const marketCapUsd = marketData.market_cap?.usd ?? 0;
     const priceUsd = marketData.current_price?.usd ?? 0;
     const volume24hUsd = marketData.total_volume?.usd ?? 0;
+    const priceChange24h = marketData.price_change_percentage_24h;
 
     if (marketCapUsd === 0 && priceUsd === 0) return null;
 
     return {
       marketCapUsd,
       priceUsd,
+      priceChange24h,
       volume24hUsd,
       timestamp: Math.floor(Date.now() / 1000),
       source: "coingecko",
@@ -211,7 +215,7 @@ export async function fetchLaunchMarketData(
       developer_data: "false",
       sparkline: "false",
     });
-    
+
     if (COINGECKO_KEY) {
       params.set("x_cg_demo_api_key", COINGECKO_KEY);
     }
@@ -243,13 +247,13 @@ export async function fetchLaunchMarketData(
         date: new Date(launchDate * 1000).toISOString().split("T")[0], // YYYY-MM-DD
         localization: "false",
       });
-      
+
       if (COINGECKO_KEY) {
         historyParams.set("x_cg_demo_api_key", COINGECKO_KEY);
       }
 
       const history = await fetchJson<CoinGeckoHistoryResponse>(`${historyUrl}?${historyParams.toString()}`);
-      
+
       const initialMarketCapUsd = history.market_data?.market_cap?.usd;
       const initialPriceUsd = history.market_data?.current_price?.usd;
 

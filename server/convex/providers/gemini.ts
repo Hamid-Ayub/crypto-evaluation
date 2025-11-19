@@ -53,21 +53,35 @@ export type GeminiGenerationResult = {
 
 export async function generateGeminiContent(
   prompt: string,
-  options?: { temperature?: number; maxOutputTokens?: number; enableGoogleSearch?: boolean },
+  options?: {
+    temperature?: number;
+    maxOutputTokens?: number;
+    enableGoogleSearch?: boolean;
+    responseMimeType?: string;
+    responseSchema?: any;
+  },
 ): Promise<GeminiGenerationResult> {
   const model = ensureModel();
   const enableGoogleSearch =
     options?.enableGoogleSearch ?? GEMINI_ENABLE_GOOGLE_SEARCH;
   const started = Date.now();
   const tools = enableGoogleSearch ? ([{ googleSearch: {} }] as any) : undefined;
+
+  const generationConfig: any = {
+    temperature: options?.temperature ?? 0.3,
+    maxOutputTokens: 4096,
+  };
+
+  if (options?.responseMimeType) {
+    generationConfig.responseMimeType = options.responseMimeType;
+  }
+  if (options?.responseSchema) {
+    generationConfig.responseSchema = options.responseSchema;
+  }
+
   const response = await model.generateContent({
     contents: [{ role: "user", parts: [{ text: prompt }] }],
-    generationConfig: {
-      temperature: options?.temperature ?? 0.3,
-      maxOutputTokens: 4096,
-      //maxOutputTokens: options?.maxOutputTokens ?? 2048,
-
-    },
+    generationConfig,
     tools,
   });
 
@@ -87,8 +101,7 @@ export async function generateGeminiContent(
   if (!text?.trim()) {
     if (promptFeedback?.blockReason) {
       throw new Error(
-        `gemini-blocked-${promptFeedback.blockReason}${
-          promptFeedback?.safetyRatings ? `:${JSON.stringify(promptFeedback.safetyRatings)}` : ""
+        `gemini-blocked-${promptFeedback.blockReason}${promptFeedback?.safetyRatings ? `:${JSON.stringify(promptFeedback.safetyRatings)}` : ""
         }`,
       );
     }

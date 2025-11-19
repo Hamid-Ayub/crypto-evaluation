@@ -3,18 +3,19 @@
 type Props = {
   avatar: string;
   symbol: string;
-  size?: "sm" | "md" | "lg";
+  size?: "sm" | "md" | "lg" | "xl";
 };
 
 const SIZE_MAP = {
   sm: "h-6 w-6 text-sm",
   md: "h-8 w-8 text-2xl",
   lg: "h-12 w-12 text-4xl",
+  xl: "h-16 w-16 text-5xl",
 };
 
 export default function TokenAvatar({ avatar, symbol, size = "md" }: Props) {
   const isUrl = avatar.startsWith("http://") || avatar.startsWith("https://");
-  
+
   if (isUrl) {
     return (
       <div className="relative">
