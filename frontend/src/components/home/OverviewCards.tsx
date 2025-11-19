@@ -1,43 +1,32 @@
 import { TokenRecord } from "@/types/token";
-import { ScoreLookupResult, formatUsd } from "@/lib/api";
+import { ScoreLookupResult, formatUsd, TokenListResponse } from "@/lib/api";
 import { ArrowUpRight, Gauge, Layers, ShieldCheck } from "lucide-react";
 import TokenAvatar from "@/components/shared/TokenAvatar";
 
 type Props = {
   tokens: TokenRecord[];
   lastLookup?: ScoreLookupResult | null;
+  summary?: TokenListResponse["summary"];
+  totalItems?: number;
 };
 
-export default function OverviewCards({ tokens, lastLookup }: Props) {
-  const avgBenchmark =
-    tokens.length > 0
-      ? tokens.reduce((sum, token) => sum + token.benchmarkScore, 0) / tokens.length
-      : 0;
-  const liquidityValues = [...tokens].map((token) => token.liquidityUsd).sort((a, b) => a - b);
-  const medianLiquidity =
-    liquidityValues.length > 0
-      ? liquidityValues[Math.floor(liquidityValues.length / 2)]
-      : 0;
-  const totalLiquidity = tokens.reduce((sum, token) => sum + token.liquidityUsd, 0);
-  const totalHolders = tokens.reduce((sum, token) => sum + token.holders, 0);
-  const avgGini = tokens.length > 0
-    ? tokens.reduce((sum, token) => sum + token.benchmarkDetails.gini, 0) / tokens.length
-    : 0;
+export default function OverviewCards({ tokens, lastLookup, summary, totalItems }: Props) {
+  const avgBenchmark = summary?.averageBenchmark ?? 0;
+  const totalLiquidity = summary?.totalLiquidityUsd ?? 0;
+  const totalHolders = summary?.totalHolders ?? 0;
+
+  // Calculate averages from visible tokens for sub-labels (or could be added to backend summary if needed)
   const avgNakamoto = tokens.length > 0
     ? tokens.reduce((sum, token) => sum + token.benchmarkDetails.nakamoto, 0) / tokens.length
     : 0;
-  const riskBreakdown = tokens.reduce(
-    (acc, token) => {
-      acc[token.risk] += 1;
-      return acc;
-    },
-    { low: 0, medium: 0, high: 0 },
-  );
+  const avgGini = tokens.length > 0
+    ? tokens.reduce((sum, token) => sum + token.benchmarkDetails.gini, 0) / tokens.length
+    : 0;
 
   const cards = [
     {
       label: "Assets benchmarked",
-      value: tokens.length.toString(),
+      value: (totalItems ?? tokens.length).toString(),
       subLabel: `Across ${new Set(tokens.map(t => t.chain)).size} chains`,
       icon: <Layers className="h-5 w-5 text-[#8ee3ff]" />,
     },

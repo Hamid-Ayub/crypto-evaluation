@@ -1,6 +1,7 @@
 import React from "react";
-import { TokenRecord, AiReportStructure } from "@/types/token";
+import { TokenRecord, AiReportStructure, AiSectionSource } from "@/types/token";
 import { AlertTriangle, CheckCircle, TrendingUp, Shield, Users, DollarSign } from "lucide-react";
+import CitationRenderer from "./CitationRenderer";
 
 interface Props {
   token: TokenRecord;
@@ -8,6 +9,7 @@ interface Props {
 
 export default function ResearchDashboard({ token }: Props) {
   const report = token.aiReport?.report;
+  const sources = token.aiReport?.sources || [];
 
   if (!report) {
     return (
@@ -47,7 +49,7 @@ export default function ResearchDashboard({ token }: Props) {
               {report.executive_summary.key_strengths.map((s, i) => (
                 <li key={i} className="flex items-start gap-2 text-sm text-white/70">
                   <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-green-400" />
-                  {s}
+                  <span><CitationRenderer content={s} sources={sources} /></span>
                 </li>
               ))}
             </ul>
@@ -61,7 +63,7 @@ export default function ResearchDashboard({ token }: Props) {
               {report.executive_summary.key_weaknesses.map((w, i) => (
                 <li key={i} className="flex items-start gap-2 text-sm text-white/70">
                   <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-red-400" />
-                  {w}
+                  <span><CitationRenderer content={w} sources={sources} /></span>
                 </li>
               ))}
             </ul>
@@ -77,16 +79,22 @@ export default function ResearchDashboard({ token }: Props) {
           className="lg:col-span-1"
         >
           <div className="flex flex-col gap-4">
-            <MetricRow label="Owner Influence" value={report.decentralization_analysis.owner_influence} />
-            <MetricRow label="Governance Health" value={report.decentralization_analysis.governance_health} />
-            
+            <MetricRow
+              label="Owner Influence"
+              value={<CitationRenderer content={report.decentralization_analysis.owner_influence} sources={sources} />}
+            />
+            <MetricRow
+              label="Governance Health"
+              value={<CitationRenderer content={report.decentralization_analysis.governance_health} sources={sources} />}
+            />
+
             <div className="mt-2">
               <h4 className="mb-2 text-xs font-semibold uppercase tracking-wider text-white/40">Centralization Vectors</h4>
               <ul className="space-y-2">
                 {report.decentralization_analysis.centralization_vectors.map((vector, i) => (
                   <li key={i} className="flex items-start gap-2 rounded-lg bg-white/5 p-3 text-xs text-white/70">
                     <AlertTriangle className="h-3 w-3 shrink-0 text-[#f7c548] mt-0.5" />
-                    {vector}
+                    <span><CitationRenderer content={vector} sources={sources} /></span>
                   </li>
                 ))}
               </ul>
@@ -103,23 +111,23 @@ export default function ResearchDashboard({ token }: Props) {
           <div className="flex flex-col gap-4">
             <div className="rounded-xl bg-white/5 p-3">
               <h4 className="mb-1 text-xs text-white/40">Competitor Landscape</h4>
-              <p className="text-sm text-white/80">{report.market_intelligence.competitor_comparison}</p>
+              <p className="text-sm text-white/80"><CitationRenderer content={report.market_intelligence.competitor_comparison} sources={sources} /></p>
             </div>
-            
+
             <div className="rounded-xl bg-white/5 p-3">
               <h4 className="mb-1 text-xs text-white/40">Liquidity Analysis</h4>
-              <p className="text-sm text-white/80">{report.market_intelligence.liquidity_commentary}</p>
+              <p className="text-sm text-white/80"><CitationRenderer content={report.market_intelligence.liquidity_commentary} sources={sources} /></p>
             </div>
 
             <div>
-               <h4 className="mb-2 text-xs font-semibold uppercase tracking-wider text-white/40">Upcoming Catalysts</h4>
-               <div className="flex flex-wrap gap-2">
-                 {report.market_intelligence.catalysts.map((c, i) => (
-                   <span key={i} className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-[#3fe081]">
-                     {c}
-                   </span>
-                 ))}
-               </div>
+              <h4 className="mb-2 text-xs font-semibold uppercase tracking-wider text-white/40">Upcoming Catalysts</h4>
+              <div className="flex flex-wrap gap-2">
+                {report.market_intelligence.catalysts.map((c, i) => (
+                  <span key={i} className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-[#3fe081]">
+                    <CitationRenderer content={c} sources={sources} />
+                  </span>
+                ))}
+              </div>
             </div>
           </div>
         </DashboardCard>
@@ -130,39 +138,39 @@ export default function ResearchDashboard({ token }: Props) {
           icon={<Shield className="h-5 w-5 text-[#f7c548]" />}
           className="lg:col-span-1"
         >
-           <div className="flex flex-col gap-4">
-             <div className="rounded-xl bg-white/5 p-3">
-               <h4 className="mb-1 text-xs text-white/40">Audit Coverage</h4>
-               <p className="text-sm text-white/80">{report.security_audit.audit_coverage}</p>
-             </div>
+          <div className="flex flex-col gap-4">
+            <div className="rounded-xl bg-white/5 p-3">
+              <h4 className="mb-1 text-xs text-white/40">Audit Coverage</h4>
+              <p className="text-sm text-white/80"><CitationRenderer content={report.security_audit.audit_coverage} sources={sources} /></p>
+            </div>
 
-             <div>
+            <div>
               <h4 className="mb-2 text-xs font-semibold uppercase tracking-wider text-white/40">Identified Contract Risks</h4>
               <ul className="space-y-2">
                 {report.security_audit.contract_risks.length > 0 ? (
                   report.security_audit.contract_risks.map((risk, i) => (
                     <li key={i} className="flex items-start gap-2 text-xs text-white/70">
-                       <AlertTriangle className="h-3 w-3 shrink-0 text-[#f7c548] mt-0.5" />
-                       {risk}
+                      <AlertTriangle className="h-3 w-3 shrink-0 text-[#f7c548] mt-0.5" />
+                      <span><CitationRenderer content={risk} sources={sources} /></span>
                     </li>
                   ))
                 ) : (
                   <li className="text-xs text-white/40 italic">No critical risks flagged by AI</li>
                 )}
               </ul>
-             </div>
-           </div>
+            </div>
+          </div>
         </DashboardCard>
       </div>
-      
+
       {/* Sources & Citations */}
       {token.aiReport?.sources && token.aiReport.sources.length > 0 && (
         <div className="mt-4 rounded-2xl border border-white/5 bg-black/20 p-6">
           <h3 className="mb-4 text-xs font-bold uppercase tracking-widest text-white/40">Verified Sources</h3>
           <div className="flex flex-wrap gap-3">
             {token.aiReport.sources.map((source) => (
-              <a 
-                key={source.id} 
+              <a
+                key={source.id}
                 href={source.url}
                 target="_blank"
                 rel="noopener noreferrer"
@@ -208,7 +216,7 @@ function DashboardCard({ title, icon, children, className = "" }: { title: strin
   );
 }
 
-function MetricRow({ label, value }: { label: string; value: string }) {
+function MetricRow({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div>
       <h4 className="mb-1 text-xs text-white/40">{label}</h4>

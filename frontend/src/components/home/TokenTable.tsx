@@ -27,6 +27,7 @@ type Props = {
   page: number;
   pageSize: number;
   onPageChange: (page: number) => void;
+  onPageSizeChange: (pageSize: number) => void;
   view: ViewMode;
   sort?: string;
   sortDir?: "asc" | "desc";
@@ -59,6 +60,7 @@ export default function TokenTable({
   page,
   totalPages,
   onPageChange,
+  onPageSizeChange,
   totalItems,
   view,
   pageSize,
@@ -89,11 +91,25 @@ export default function TokenTable({
         />
       )}
       <div className="flex flex-col gap-3 border-t border-white/5 px-4 py-3 text-xs text-[color:var(--color-text-secondary)] sm:flex-row sm:items-center sm:justify-between">
-        <p>
-          Showing <strong className="text-white">{tokens.length}</strong> of{" "}
-          <strong className="text-white">{totalItems}</strong> benchmarked assets •{" "}
-          {pageSize} per page
-        </p>
+        <div className="flex flex-wrap items-center gap-3">
+          <p>
+            Showing <strong className="text-white">{((page - 1) * pageSize) + 1}-{Math.min(page * pageSize, totalItems)}</strong> of{" "}
+            <strong className="text-white">{totalItems}</strong> assets
+          </p>
+          <div className="flex items-center gap-2">
+            <span className="text-[color:var(--color-text-muted)]">Per page:</span>
+            <select
+              value={pageSize}
+              onChange={(e) => onPageSizeChange(Number(e.target.value))}
+              className="rounded-lg border border-white/10 bg-black/20 px-2 py-1 text-xs text-white outline-none focus:border-white/40"
+            >
+              <option value={10}>10</option>
+              <option value={25}>25</option>
+              <option value={50}>50</option>
+              <option value={100}>100</option>
+            </select>
+          </div>
+        </div>
         <Pagination page={page} totalPages={totalPages} onPageChange={onPageChange} />
       </div>
     </div>
@@ -134,7 +150,7 @@ function SortableHeader({
 
   const handleClick = () => {
     if (!sortKey || !onSort) return;
-    
+
     if (isActive) {
       // Toggle direction
       onSort(sortKey, isDesc ? "asc" : "desc");
@@ -161,22 +177,20 @@ function SortableHeader({
         <span>{label}</span>
         <span className="flex flex-col">
           <ArrowUp
-            className={`h-3 w-3 transition-opacity ${
-              isAsc
-                ? "opacity-100 text-white"
-                : isActive
+            className={`h-3 w-3 transition-opacity ${isAsc
+              ? "opacity-100 text-white"
+              : isActive
                 ? "opacity-30"
                 : "opacity-20 group-hover:opacity-40"
-            }`}
+              }`}
           />
           <ArrowDown
-            className={`h-3 w-3 -mt-1 transition-opacity ${
-              isDesc
-                ? "opacity-100 text-white"
-                : isActive
+            className={`h-3 w-3 -mt-1 transition-opacity ${isDesc
+              ? "opacity-100 text-white"
+              : isActive
                 ? "opacity-30"
                 : "opacity-20 group-hover:opacity-40"
-            }`}
+              }`}
           />
         </span>
       </button>
@@ -222,10 +236,10 @@ function TokenTableView({
             return (
               <Fragment key={token.id}>
                 <tr className="border-b border-white/[0.06] text-[color:var(--color-text-secondary)] transition hover:bg-white/[0.02]">
-                      <td className="px-6 py-4">
-                        <div className="flex items-center gap-3">
-                          <TokenAvatar avatar={token.avatar} symbol={token.symbol} />
-                          <div>
+                  <td className="px-6 py-4">
+                    <div className="flex items-center gap-3">
+                      <TokenAvatar avatar={token.avatar} symbol={token.symbol} />
+                      <div>
                         <p className="text-base font-semibold text-white">{token.name}</p>
                         <p className="text-xs uppercase tracking-[0.35em] text-[color:var(--color-text-muted)]">
                           {token.symbol} • {token.chainLabel}
@@ -239,8 +253,8 @@ function TokenTableView({
                     </button>
                   </td>
                   <td className="px-6 py-4">
-                    <ScoreIndicator 
-                      score={token.benchmarkScore} 
+                    <ScoreIndicator
+                      score={token.benchmarkScore}
                       id={token.id}
                       details={{
                         ownership: token.benchmarkDetails.ownership,
@@ -310,13 +324,13 @@ function RiskBadge({ level }: { level: TokenRecord["risk"] }) {
 function ExpandedRow({ token }: { token: TokenRecord }) {
   const isWellDecentralized = token.benchmarkDetails.nakamoto >= 4 && token.benchmarkDetails.gini < 0.5;
   const hasConcentrationRisk = token.benchmarkDetails.hhi >= 1500 || token.benchmarkDetails.nakamoto < 4;
-  
+
   const insights = [
     {
       label: "Decentralization Status",
       value: isWellDecentralized ? "Well Decentralized" : hasConcentrationRisk ? "Centralization Risk" : "Moderate",
       color: isWellDecentralized ? "#3fe081" : hasConcentrationRisk ? "#ff8a5c" : "#f7c548",
-      detail: token.benchmarkDetails.nakamoto >= 4 
+      detail: token.benchmarkDetails.nakamoto >= 4
         ? `${token.benchmarkDetails.nakamoto} entities needed for majority control`
         : `Only ${token.benchmarkDetails.nakamoto} entities control majority`,
     },
@@ -403,8 +417,8 @@ function ExpandedRow({ token }: { token: TokenRecord }) {
         <div className="space-y-2">
           {insights.map((insight, idx) => (
             <div key={idx} className="flex items-start gap-2">
-              <div 
-                className="h-1.5 w-1.5 rounded-full mt-1.5 flex-shrink-0" 
+              <div
+                className="h-1.5 w-1.5 rounded-full mt-1.5 flex-shrink-0"
                 style={{ backgroundColor: insight.color }}
               />
               <div className="flex-1 min-w-0">
@@ -492,7 +506,7 @@ function TokenGrid({ tokens }: { tokens: TokenRecord[] }) {
                 </p>
               </div>
             </div>
-            <ScoreIndicator 
+            <ScoreIndicator
               score={token.benchmarkScore}
               details={{
                 ownership: token.benchmarkDetails.ownership,

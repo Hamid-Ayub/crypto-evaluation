@@ -1,5 +1,5 @@
 import { ChangeEvent } from "react";
-import { Download, Filter, Search } from "lucide-react";
+import { Download, Search } from "lucide-react";
 
 export type FilterState = {
   chain: string;
@@ -75,7 +75,7 @@ export default function FilterBar({ filters, onChange, onExport, total }: Props)
     <div className="flex flex-col gap-4 rounded-[24px] border border-white/5 bg-white/[0.02] p-5">
       <div className="flex flex-col gap-2">
         <label className="text-xs font-semibold uppercase tracking-[0.35em] text-[color:var(--color-text-muted)]">
-          Search universe
+          Search
         </label>
         <div className="relative">
           <Search className="pointer-events-none absolute left-4 top-3.5 h-4 w-4 text-[color:var(--color-text-muted)]" />
@@ -113,31 +113,6 @@ export default function FilterBar({ filters, onChange, onExport, total }: Props)
         ))}
       </div>
 
-      <div className="flex flex-wrap items-center gap-2">
-        <p className="text-xs uppercase tracking-[0.35em] text-[color:var(--color-text-muted)]">
-          Quick risk lenses
-        </p>
-        <div className="flex flex-wrap gap-2">
-          {["low", "medium", "high"].map((risk) => {
-            const active = filters.risk === risk;
-            return (
-              <button
-                key={risk}
-                type="button"
-                onClick={() => update({ risk: active ? "all" : (risk as FilterState["risk"]) })}
-                className={`rounded-full px-3 py-1 text-xs font-semibold capitalize transition ${
-                  active
-                    ? "bg-[#3fe081]/20 text-[#3fe081] border border-[#3fe081]/40"
-                    : "border border-white/10 text-[color:var(--color-text-secondary)] hover:border-white/30"
-                }`}
-              >
-                {risk}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex flex-1 flex-wrap gap-3">
           <div className="flex items-center gap-2">
@@ -172,11 +147,10 @@ export default function FilterBar({ filters, onChange, onExport, total }: Props)
                     key={option.value}
                     type="button"
                     onClick={() => update({ view: option.value })}
-                    className={`rounded-full px-4 py-1 text-xs font-semibold transition ${
-                      active
-                        ? "bg-white text-black"
-                        : "text-white/70 hover:text-white"
-                    }`}
+                    className={`rounded-full px-4 py-1 text-xs font-semibold transition ${active
+                      ? "bg-white text-black"
+                      : "text-white/70 hover:text-white"
+                      }`}
                   >
                     {option.label}
                   </button>
@@ -186,13 +160,6 @@ export default function FilterBar({ filters, onChange, onExport, total }: Props)
           </div>
         </div>
         <div className="flex flex-shrink-0 flex-wrap gap-3">
-          <button
-            className="flex items-center justify-center gap-2 rounded-full border border-white/15 px-5 py-3 text-sm font-semibold text-white transition hover:border-white/40"
-            type="button"
-          >
-            <Filter className="h-4 w-4" />
-            Advanced filters
-          </button>
           <button
             onClick={onExport}
             type="button"

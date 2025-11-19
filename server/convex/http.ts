@@ -37,6 +37,8 @@ const postEndpoints = [
   "/api/report/section",
   "/api/report/generateAll",
   "/api/project/parse",
+  "/api/tokens/:tokenId/refresh-market-data",
+  "/api/tokens/:tokenId/refresh-stats",
 ];
 
 for (const path of postEndpoints) {
@@ -104,7 +106,7 @@ router.route({
     const id = url.searchParams.get("id");
     const address = url.searchParams.get("address");
     const chainId = url.searchParams.get("chainId");
-    
+
     // Support both id (CAIP-19 or address) and address+chainId params
     let tokenId: string | null = null;
     if (id) {
@@ -117,9 +119,9 @@ router.route({
         tokenId = address; // Address-only, will search across chains
       }
     }
-    
+
     if (!tokenId) return withCors(new Response("Missing id or address", { status: 400 }));
-    
+
     const token = await ctx.runQuery(api.assets.getEnriched, { tokenId });
     if (!token) return withCors(new Response("Not found", { status: 404 }));
     return withCors(new Response(JSON.stringify(token), {
@@ -137,61 +139,61 @@ router.route({
       const ip = req.headers.get("x-forwarded-for") ?? "anon";
       const rate = await ctx.runMutation(api.rateLimit.checkAndIncrement, { key: `ip:${ip}`, plan: "free" });
       if (!rate.ok) {
-        return withCors(new Response(JSON.stringify({ error: "Too many requests" }), { 
-          status: 429, 
-          headers: { "content-type": "application/json" } 
+        return withCors(new Response(JSON.stringify({ error: "Too many requests" }), {
+          status: 429,
+          headers: { "content-type": "application/json" }
         }));
       }
 
       const body = await req.json();
       const { chainId, address } = body || {};
       if (!chainId || !address) {
-        return withCors(new Response(JSON.stringify({ error: "Missing chainId or address" }), { 
-          status: 400, 
-          headers: { "content-type": "application/json" } 
+        return withCors(new Response(JSON.stringify({ error: "Missing chainId or address" }), {
+          status: 400,
+          headers: { "content-type": "application/json" }
         }));
       }
 
       // Normalize address
       const normalizedAddress = address.toLowerCase().trim();
-      
-      let asset = await ctx.runQuery(api.assets.getByChainAddress, { 
-        chainId: chainId.trim(), 
-        address: normalizedAddress 
+
+      let asset = await ctx.runQuery(api.assets.getByChainAddress, {
+        chainId: chainId.trim(),
+        address: normalizedAddress
       });
-      
+
       if (!asset) {
         // Create asset if it doesn't exist
-        const assetId = await ctx.runMutation(internal.assets.ensureAsset, { 
-          chainId: chainId.trim(), 
-          address: normalizedAddress, 
-          standard: "erc20", 
-          status: "pending" 
+        const assetId = await ctx.runMutation(internal.assets.ensureAsset, {
+          chainId: chainId.trim(),
+          address: normalizedAddress,
+          standard: "erc20",
+          status: "pending"
         });
         asset = await ctx.runQuery(api.assets.getAssetInternal, { assetId });
-        
+
         if (!asset) {
-          return withCors(new Response(JSON.stringify({ error: "Failed to create asset" }), { 
-            status: 500, 
-            headers: { "content-type": "application/json" } 
+          return withCors(new Response(JSON.stringify({ error: "Failed to create asset" }), {
+            status: 500,
+            headers: { "content-type": "application/json" }
           }));
         }
       }
-      
+
       // Queue refresh job
       await ctx.runMutation(api.assets.requestRefresh, { assetId: asset._id });
-      
-      return withCors(new Response(JSON.stringify({ enqueued: true }), { 
-        status: 200, 
-        headers: { "content-type": "application/json" } 
+
+      return withCors(new Response(JSON.stringify({ enqueued: true }), {
+        status: 200,
+        headers: { "content-type": "application/json" }
       }));
     } catch (error) {
       console.error("Error in /api/refresh:", error);
-      return withCors(new Response(JSON.stringify({ 
-        error: error instanceof Error ? error.message : "Internal server error" 
-      }), { 
-        status: 500, 
-        headers: { "content-type": "application/json" } 
+      return withCors(new Response(JSON.stringify({
+        error: error instanceof Error ? error.message : "Internal server error"
+      }), {
+        status: 500,
+        headers: { "content-type": "application/json" }
       }));
     }
   }),
@@ -389,7 +391,7 @@ router.route({
     try {
       const data = await analyzeContract(chainId, address as any);
       return withCors(new Response(JSON.stringify(data), { status: 200, headers: { "content-type": "application/json" } }));
-    } catch (e:any) {
+    } catch (e: any) {
       return withCors(new Response(JSON.stringify({ error: e?.message || "introspection-failed" }), { status: 500 }));
     }
   }),
@@ -407,7 +409,7 @@ router.route({
     try {
       const data = await liquidityForToken(chainName, token);
       return withCors(new Response(JSON.stringify(data), { status: 200, headers: { "content-type": "application/json" } }));
-    } catch (e:any) {
+    } catch (e: any) {
       return withCors(new Response(JSON.stringify({ error: e?.message || "liquidity-failed" }), { status: 500 }));
     }
   }),
@@ -425,7 +427,7 @@ router.route({
     try {
       const data = await governanceForToken(chainId, token);
       return withCors(new Response(JSON.stringify(data), { status: 200, headers: { "content-type": "application/json" } }));
-    } catch (e:any) {
+    } catch (e: any) {
       return withCors(new Response(JSON.stringify({ error: e?.message || "governance-failed" }), { status: 500 }));
     }
   }),
@@ -527,9 +529,143 @@ router.route({
   handler: httpAction(async (ctx, req) => {
     const body = await req.json().catch(() => ({}));
     const chain = body.chain || "ethereum";
-    
+
     const result = await ctx.runAction(internal.schedulerActions.discoverAndQueueTokens, { chain });
     return withCors(new Response(JSON.stringify(result), { status: 200, headers: { "content-type": "application/json" } }));
+  }),
+});
+
+// Refresh volatile data (market price/volume) for a token
+router.route({
+  path: "/api/tokens/:tokenId/refresh-market-data",
+  method: "POST",
+  handler: httpAction(async (ctx, req) => {
+    const tokenId = req.params.tokenId;
+    if (!tokenId) {
+      return withCors(new Response(JSON.stringify({ error: "Missing tokenId" }), {
+        status: 400,
+        headers: { "content-type": "application/json" }
+      }));
+    }
+
+    try {
+      // Get token by ID (CAIP-19)
+      const token = await ctx.runQuery(api.assets.getEnriched, { tokenId });
+      if (!token) {
+        return withCors(new Response(JSON.stringify({ error: "Token not found" }), {
+          status: 404,
+          headers: { "content-type": "application/json" }
+        }));
+      }
+
+      // Get asset by chain/address
+      const asset = await ctx.runQuery(api.assets.getByChainAddress, {
+        chainId: token.chain,
+        address: token.address,
+      });
+      if (!asset) {
+        return withCors(new Response(JSON.stringify({ error: "Token not found" }), {
+          status: 404,
+          headers: { "content-type": "application/json" }
+        }));
+      }
+
+      // Check if refresh is already in progress
+      const inProgress = await ctx.runQuery(api.refresh.isRefreshInProgress, {
+        assetId: asset._id,
+        refreshType: "volatile",
+      });
+
+      if (inProgress) {
+        return withCors(new Response(JSON.stringify({ error: "Refresh already in progress" }), {
+          status: 409,
+          headers: { "content-type": "application/json" }
+        }));
+      }
+
+      // Trigger refresh action
+      const result = await ctx.runAction(internal.refreshActions.refreshVolatileData, {
+        assetId: asset._id,
+      });
+
+      return withCors(new Response(JSON.stringify(result), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      }));
+    } catch (error: any) {
+      console.error("Refresh market data error:", error);
+      return withCors(new Response(JSON.stringify({ error: error.message }), {
+        status: 500,
+        headers: { "content-type": "application/json" }
+      }));
+    }
+  }),
+});
+
+// Refresh semi-volatile data (holders, liquidity, governance, GitHub) for a token
+router.route({
+  path: "/api/tokens/:tokenId/refresh-stats",
+  method: "POST",
+  handler: httpAction(async (ctx, req) => {
+    const tokenId = req.params.tokenId;
+    if (!tokenId) {
+      return withCors(new Response(JSON.stringify({ error: "Missing tokenId" }), {
+        status: 400,
+        headers: { "content-type": "application/json" }
+      }));
+    }
+
+    try {
+      // Get token by ID (CAIP-19)
+      const token = await ctx.runQuery(api.assets.getEnriched, { tokenId });
+      if (!token) {
+        return withCors(new Response(JSON.stringify({ error: "Token not found" }), {
+          status: 404,
+          headers: { "content-type": "application/json" }
+        }));
+      }
+
+      // Get asset by chain/address
+      const asset = await ctx.runQuery(api.assets.getByChainAddress, {
+        chainId: token.chain,
+        address: token.address,
+      });
+      if (!asset) {
+        return withCors(new Response(JSON.stringify({ error: "Token not found" }), {
+          status: 404,
+          headers: { "content-type": "application/json" }
+        }));
+      }
+
+      // Check if refresh is already in progress
+      const inProgress = await ctx.runQuery(api.refresh.isRefreshInProgress, {
+        assetId: asset._id,
+        refreshType: "semiVolatile",
+      });
+
+      if (inProgress) {
+        return withCors(new Response(JSON.stringify({ error: "Refresh already in progress" }), {
+          status: 409,
+          headers: { "content-type": "application/json" }
+        }));
+      }
+
+      // Trigger refresh action
+      const result = await ctx.runAction(internal.refreshActions.refreshSemiVolatileData, {
+        assetId: asset._id,
+      });
+
+      return withCors(new Response(JSON.stringify(result), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      }));
+    } catch (error: any) {
+      console.error("Refresh stats error:", error);
+      return withCors(new Response(JSON.stringify({ error: error.message }), {
+        status: 500,
+        headers: { "content-type": "application/json" }
+      }));
+    }
   }),
 });
 
@@ -538,6 +674,48 @@ function parseNumberParam(value: string | null) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : undefined;
 }
+
+// Job status endpoint for frontend polling
+router.route({
+  path: "/api/jobs/status/:assetId",
+  method: "GET",
+  handler: httpAction(async (ctx, request) => {
+    const assetId = request.pathParams.assetId;
+
+    try {
+      const status = await ctx.runQuery(api.jobs.getJobStatusForAsset, { assetId: assetId as any });
+      return new Response(JSON.stringify(status), {
+        status: 200,
+        headers: { "content-type": "application/json", ...corsHeaders },
+      });
+    } catch (error: any) {
+      return new Response(JSON.stringify({ error: error.message }), {
+        status: 500,
+        headers: { "content-type": "application/json", ...corsHeaders },
+      });
+    }
+  }),
+});
+
+// Queue stats endpoint for frontend polling
+router.route({
+  path: "/api/jobs/queue-stats",
+  method: "GET",
+  handler: httpAction(async (ctx) => {
+    try {
+      const stats = await ctx.runQuery(api.jobs.getQueueStats, {});
+      return new Response(JSON.stringify(stats), {
+        status: 200,
+        headers: { "content-type": "application/json", ...corsHeaders },
+      });
+    } catch (error: any) {
+      return new Response(JSON.stringify({ error: error.message }), {
+        status: 500,
+        headers: { "content-type": "application/json", ...corsHeaders },
+      });
+    }
+  }),
+});
 
 export default router;
 

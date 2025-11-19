@@ -81,28 +81,54 @@ JSON Schema:
       benchmark: token.benchmarkScore,
     }); // Simple hash for now
 
-    try {
-      // 5. Call Gemini
-      const result = await generateGeminiContent(prompt, {
-        enableGoogleSearch: true,
-        temperature: 0.4, // Lower temperature for structured data
-      });
-
-      // 6. Parse JSON (handle potential markdown blocks)
-      let jsonContent = result.content.trim();
-      if (jsonContent.startsWith("```json")) {
-        jsonContent = jsonContent.replace(/^```json\s*/, "").replace(/\s*```$/, "");
-      } else if (jsonContent.startsWith("```")) {
-        jsonContent = jsonContent.replace(/^```\s*/, "").replace(/\s*```$/, "");
-      }
-
-      let parsedReport;
+    // 5. Call Gemini with Retry and Structured Output
+    const generateWithRetry = async (attempt = 1): Promise<{ result: any; parsedReport: any }> => {
       try {
-        parsedReport = JSON.parse(jsonContent);
-      } catch (e) {
-        console.error("Failed to parse Gemini JSON output", jsonContent);
-        throw new Error("ai-json-parse-error");
+        const result = await generateGeminiContent(prompt, {
+          enableGoogleSearch: true,
+          temperature: 0.4,
+        });
+
+        // 6. Parse JSON (handle potential markdown blocks and noise)
+        let jsonContent = result.content.trim();
+
+        // Extract JSON object from the response (find first { and last })
+        const firstBrace = jsonContent.indexOf("{");
+        const lastBrace = jsonContent.lastIndexOf("}");
+
+        if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+          jsonContent = jsonContent.substring(firstBrace, lastBrace + 1);
+        }
+
+        // Clean up common JSON errors (trailing commas)
+        jsonContent = jsonContent.replace(/,\s*}/g, "}").replace(/,\s*]/g, "]");
+
+        let parsedReport;
+        try {
+          parsedReport = JSON.parse(jsonContent);
+        } catch (e) {
+          console.error("Failed to parse Gemini JSON output", jsonContent);
+          throw new Error("ai-json-parse-error");
+        }
+
+        // Basic validation of required fields
+        if (!parsedReport.executive_summary || !parsedReport.decentralization_analysis) {
+          throw new Error("ai-missing-required-fields");
+        }
+
+        return { result, parsedReport };
+      } catch (error: any) {
+        if (attempt < 3) {
+          console.warn(`Gemini generation failed (attempt ${attempt}/3). Retrying...`, error);
+          await new Promise((resolve) => setTimeout(resolve, 1000 * attempt)); // Exponential backoff
+          return generateWithRetry(attempt + 1);
+        }
+        throw error;
       }
+    };
+
+    try {
+      const { result, parsedReport } = await generateWithRetry();
 
       // 7. Save Report
       const reportId = await ctx.runMutation(internal.assets.upsertAiReport, {
@@ -120,9 +146,8 @@ JSON Schema:
       return { status: "success", reportId };
 
     } catch (error: any) {
-        console.error("Gemini Report Generation Failed", error);
-        // Log error (optional)
-        throw error;
+      console.error("Gemini Report Generation Failed after retries", error);
+      throw error;
     }
   },
 });
@@ -130,7 +155,7 @@ JSON Schema:
 function buildContext(token: TokenView): string {
   let parsedContext = "";
   if (token.parsedProjectData) {
-      parsedContext = `
+    parsedContext = `
 - Founding Team: ${JSON.stringify(token.parsedProjectData.foundingTeam || "N/A")}
 - Roadmap: ${JSON.stringify(token.parsedProjectData.roadmap || "N/A")}
 - Tokenomics (Parsed): ${JSON.stringify(token.parsedProjectData.tokenomics || "N/A")}
@@ -163,6 +188,6 @@ ${parsedContext}
 }
 
 function formatUsd(val: number) {
-    return `$${val.toLocaleString()}`;
+  return `$${val.toLocaleString()}`;
 }
 

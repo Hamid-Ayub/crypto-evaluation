@@ -68,6 +68,7 @@ export default defineSchema({
     source: v.optional(v.string()),
     sources: v.optional(v.array(v.string())), // Multiple sources for cross-validation
     crossValidationStatus: v.optional(v.string()), // e.g., "3 sources agree", "data conflict"
+    fetchedAt: v.optional(v.number()), // When this data was last fetched
     createdAt: v.number(),
   }).index("by_asset_block", ["assetId", "asOfBlock"]),
 
@@ -82,6 +83,7 @@ export default defineSchema({
     // Current snapshot
     marketCapUsd: v.optional(v.number()),
     priceUsd: v.optional(v.number()),
+    priceChange24h: v.optional(v.number()),
     volume24hUsd: v.optional(v.number()),
     currentSource: v.optional(v.string()),
     currentSourceUrl: v.optional(v.string()),
@@ -103,6 +105,7 @@ export default defineSchema({
         }),
       ),
     ),
+    fetchedAt: v.optional(v.number()), // When volatile data was last fetched
     updatedAt: v.number(),
     createdAt: v.number(),
   }).index("by_asset", ["assetId"]),
@@ -112,6 +115,7 @@ export default defineSchema({
     asOfBlock: v.number(),
     pools: v.array(v.object({ dex: v.string(), poolAddress: v.string(), tvlUsd: v.number(), sharePct: v.number() })),
     cexSharePct: v.optional(v.number()),
+    fetchedAt: v.optional(v.number()), // When this data was last fetched
     createdAt: v.number(),
   }).index("by_asset_block", ["assetId", "asOfBlock"]),
 
@@ -289,12 +293,15 @@ export default defineSchema({
     type: v.string(),
     params: v.any(),
     status: v.string(),
+    priority: v.optional(v.number()), // Higher = more important (user requests: 200, high mcap: 100, medium: 50, low: 10)
     startedAt: v.optional(v.number()),
     finishedAt: v.optional(v.number()),
     error: v.optional(v.string()),
     createdAt: v.number(),
     updatedAt: v.number(),
-  }).index("by_status", ["status"]),
+  })
+    .index("by_status", ["status"])
+    .index("by_status_priority", ["status", "priority", "createdAt"]),
 
   rate_limits: defineTable({
     key: v.string(),
@@ -328,5 +335,44 @@ export default defineSchema({
     updatedAt: v.number(),
     createdAt: v.number(),
   }).index("by_enabled", ["enabled"]),
+
+  scoring_config: defineTable({
+    weights: v.object({
+      ownership: v.number(),
+      controlRisk: v.number(),
+      liquidity: v.number(),
+      governance: v.number(),
+      chainLevel: v.number(),
+      codeAssurance: v.number(),
+    }),
+    version: v.optional(v.string()),
+    active: v.boolean(),
+    createdAt: v.number(),
+  }).index("by_active", ["active"]),
+
+  refresh_locks: defineTable({
+    assetId: v.id("assets"),
+    refreshType: v.union(v.literal("full"), v.literal("volatile"), v.literal("semiVolatile")),
+    lockedAt: v.number(),
+    lockedBy: v.string(), // Process ID or user ID
+    status: v.union(v.literal("in_progress"), v.literal("completed"), v.literal("failed")),
+    createdAt: v.number(),
+  })
+    .index("by_asset", ["assetId"])
+    .index("by_asset_type", ["assetId", "refreshType"])
+    .index("by_status", ["status"]),
+
+  refresh_history: defineTable({
+    assetId: v.id("assets"),
+    refreshType: v.string(),
+    startedAt: v.number(),
+    completedAt: v.optional(v.number()),
+    success: v.boolean(),
+    errorMessage: v.optional(v.string()),
+    apiCallsMade: v.number(),
+    createdAt: v.number(),
+  })
+    .index("by_asset", ["assetId"])
+    .index("by_time", ["completedAt"]),
 });
 

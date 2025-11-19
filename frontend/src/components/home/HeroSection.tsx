@@ -32,7 +32,7 @@ export default function HeroSection({ onLookupSuccess, lastLookup }: Props) {
       // Try to detect chain from CAIP-19 format or search across chains
       const input = address.trim();
       let chainId: string | null = null;
-      
+
       // Check if it's a CAIP-19 identifier (eip155:1:erc20:0x...)
       if (input.includes(":")) {
         const parts = input.split(":");
@@ -40,11 +40,11 @@ export default function HeroSection({ onLookupSuccess, lastLookup }: Props) {
           chainId = `${parts[0]}:${parts[1]}`;
         }
       }
-      
+
       // If no chain detected, try searching across chains (start with Ethereum)
-      const result = await fetchScore({ 
-        chainId: chainId || "eip155:1", 
-        address: input.includes(":") ? input.split(":").slice(3).join(":") : input 
+      const result = await fetchScore({
+        chainId: chainId || "eip155:1",
+        address: input.includes(":") ? input.split(":").slice(3).join(":") : input
       }, { autoQueue: true });
       setStatus("success");
       setMessage(
@@ -62,8 +62,9 @@ export default function HeroSection({ onLookupSuccess, lastLookup }: Props) {
   };
 
   return (
-    <section className="rounded-[32px] border border-white/10 bg-[color:var(--color-bg-card)] p-8 sm:p-12">
-      <div className="mx-auto max-w-3xl text-center space-y-8">
+    <section className="relative overflow-hidden rounded-[32px] border border-white/10 bg-[color:var(--color-bg-card)] p-8 sm:p-12">
+      <div className="absolute inset-0 bg-gradient-to-br from-[#3fe081]/5 via-transparent to-[#8ee3ff]/5 pointer-events-none" />
+      <div className="relative mx-auto max-w-3xl text-center space-y-8">
         <div className="space-y-4">
           <h1 className="text-4xl font-semibold leading-tight text-white sm:text-5xl lg:text-6xl">
             Decentralization Benchmarks
@@ -96,9 +97,8 @@ export default function HeroSection({ onLookupSuccess, lastLookup }: Props) {
           </div>
           {message && (
             <p
-              className={`mt-3 text-sm text-center ${
-                status === "error" ? "text-[#ff8a5c]" : "text-[#3fe081]"
-              }`}
+              className={`mt-3 text-sm text-center ${status === "error" ? "text-[#ff8a5c]" : "text-[#3fe081]"
+                }`}
             >
               {message}
             </p>

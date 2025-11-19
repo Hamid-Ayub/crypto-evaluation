@@ -36,6 +36,8 @@ export type TokenView = {
   liquidityUsd: number;
   holders: number;
   volume24hUsd: number;
+  priceUsd: number;
+  priceChange24h?: number;
   summary: string;
   updatedAt: string;
   tags: string[];
@@ -126,6 +128,8 @@ export type TokenView = {
 type TokenListSummary = {
   averageBenchmark: number;
   medianLiquidityUsd: number;
+  totalLiquidityUsd: number;
+  totalHolders: number;
   riskBreakdown: Record<RiskLevel, number>;
   topLiquidity: TokenView[];
 };
@@ -327,7 +331,7 @@ export const getEnriched = query({
     // If only address provided, search across all chains (prefer Ethereum first)
     const address = parsed.address;
     const preferredChains = ["eip155:1", "eip155:42161", "eip155:8453", "eip155:137", "eip155:10", "eip155:43114"];
-    
+
     // Try preferred chains first
     for (const chainId of preferredChains) {
       const asset = await ctx.db
@@ -338,7 +342,7 @@ export const getEnriched = query({
         return await buildTokenView(ctx, asset);
       }
     }
-    
+
     // Fallback: search all chains
     const cursor = ctx.db.query("assets");
     for await (const asset of cursor) {
@@ -346,7 +350,7 @@ export const getEnriched = query({
         return await buildTokenView(ctx, asset);
       }
     }
-    
+
     return null;
   },
 });
@@ -357,14 +361,14 @@ function normalizeFilters(args: TokenListArgs): NormalizedFilters {
   const requestedRisk = (args.risk ?? "").toLowerCase() as RiskLevel;
   const risk = RISK_OPTIONS.includes(requestedRisk) ? requestedRisk : "all";
   const queryText = (args.query ?? "").trim().toLowerCase();
-  
+
   // Parse sort and direction (format: "score:desc" or just "score")
   const sortInput = (args.sort ?? "").toLowerCase();
   const [sortPart, dirPart] = sortInput.split(":");
   const sortCandidate = sortPart as SortOption;
   const sort = SORT_OPTIONS.includes(sortCandidate) ? sortCandidate : SORT_DEFAULT;
   const sortDir: SortDirection = dirPart === "asc" || dirPart === "desc" ? dirPart : "desc";
-  
+
   const page = Math.max(1, args.page ?? 1);
   const pageSize = clamp(args.pageSize ?? DEFAULT_PAGE_SIZE, MIN_PAGE_SIZE, MAX_PAGE_SIZE);
 
@@ -397,7 +401,7 @@ function matchesFilters(token: TokenView, filters: NormalizedFilters) {
 function sortTokens(tokens: TokenView[], sort: SortOption, direction: SortDirection = "desc") {
   const list = [...tokens];
   const multiplier = direction === "asc" ? -1 : 1;
-  
+
   switch (sort) {
     case "liquidity":
       return list.sort((a, b) => (b.liquidityUsd - a.liquidityUsd) * multiplier);
@@ -430,6 +434,8 @@ function buildSummaryBlock(tokens: TokenView[]): TokenListSummary {
     return {
       averageBenchmark: 0,
       medianLiquidityUsd: 0,
+      totalLiquidityUsd: 0,
+      totalHolders: 0,
       riskBreakdown: { low: 0, medium: 0, high: 0 },
       topLiquidity: [],
     };
@@ -447,10 +453,14 @@ function buildSummaryBlock(tokens: TokenView[]): TokenListSummary {
   }
 
   const topLiquidity = [...tokens].sort((a, b) => b.liquidityUsd - a.liquidityUsd).slice(0, 3);
+  const totalLiquidityUsd = tokens.reduce((sum, token) => sum + token.liquidityUsd, 0);
+  const totalHolders = tokens.reduce((sum, token) => sum + token.holders, 0);
 
   return {
     averageBenchmark: Number(average.toFixed(1)),
     medianLiquidityUsd: median,
+    totalLiquidityUsd,
+    totalHolders,
     riskBreakdown,
     topLiquidity,
   };
@@ -541,7 +551,7 @@ async function buildTokenView(ctx: any, asset: Doc<"assets">): Promise<TokenView
   const benchmarkScore = Math.round(latestScore.total ?? 0);
   const risk = riskFromScore(benchmarkScore);
   const liquidityUsd = computeLiquidityUsd(liquidity);
-  
+
   // Use market data from CoinGecko if available, otherwise estimate
   const marketCapUsd = marketData?.marketCapUsd ?? estimateMarketCap(liquidityUsd);
   const volume24hUsd = marketData?.volume24hUsd ?? estimateVolume(liquidityUsd, marketCapUsd);
@@ -566,186 +576,6 @@ async function buildTokenView(ctx: any, asset: Doc<"assets">): Promise<TokenView
     avatarUrl = asset.iconUrl;
   }
 
-  // Build market data object (contextual research information)
-  const listings =
-    marketData?.exchangeListings && marketData.exchangeListings.length > 0
-      ? marketData.exchangeListings.map((listing) => ({
-          exchange: listing.exchange,
-          pair: listing.pair,
-          baseSymbol: listing.baseSymbol,
-          targetSymbol: listing.targetSymbol,
-          priceUsd: listing.priceUsd,
-          volume24hUsd: listing.volume24hUsd,
-          trustScore: listing.trustScore,
-          isDex: listing.isDex,
-          lastTradedAt: listing.lastTradedAt,
-          url: listing.url,
-          source: listing.source,
-          sourceUrl: listing.sourceUrl,
-        }))
-      : undefined;
-
-  const hasLaunchData =
-    Boolean(marketData?.launchDate) ||
-    Boolean(marketData?.initialMarketCapUsd) ||
-    Boolean(marketData?.initialPriceUsd);
-
-  const hasCurrentData =
-    Boolean(marketData?.marketCapUsd) ||
-    Boolean(marketData?.priceUsd) ||
-    Boolean(marketData?.volume24hUsd);
-
-  const marketDataObj =
-    marketData && (hasLaunchData || hasCurrentData || listings)
-      ? {
-          launch: hasLaunchData
-            ? {
-                date: marketData?.launchDate,
-                marketCapUsd: marketData?.initialMarketCapUsd,
-                priceUsd: marketData?.initialPriceUsd,
-                source: marketData?.launchSource,
-                sourceUrl: marketData?.launchSourceUrl,
-              }
-            : undefined,
-          current: hasCurrentData
-            ? {
-                marketCapUsd: marketData?.marketCapUsd,
-                priceUsd: marketData?.priceUsd,
-                volume24hUsd: marketData?.volume24hUsd,
-                source: marketData?.currentSource,
-                sourceUrl: marketData?.currentSourceUrl,
-                updatedAt: marketData?.updatedAt,
-              }
-            : undefined,
-          listings,
-        }
-      : undefined;
-
-  const projectProfileInfo = projectProfile
-    ? {
-        githubRepos: projectProfile.githubRepos,
-        website: projectProfile.website,
-        docs: projectProfile.docs,
-        twitter: projectProfile.twitter,
-        discord: projectProfile.discord,
-        telegram: projectProfile.telegram,
-      }
-    : undefined;
-
-  const development =
-    developmentRows && developmentRows.length > 0
-      ? {
-          repos: developmentRows.map(
-            (row: Doc<"development_stats">): DevelopmentRepoStats => ({
-              repo: row.repo,
-              repoUrl: row.repoUrl,
-              owner: row.owner,
-              name: row.name,
-              description: row.description,
-              homepage: row.homepage,
-              license: row.license,
-              stars: row.stars,
-              forks: row.forks,
-              watchers: row.watchers,
-              openIssues: row.openIssues,
-              subscribers: row.subscribers,
-              defaultBranch: row.defaultBranch,
-              primaryLanguage: row.primaryLanguage,
-              topics: row.topics,
-              commitsLast4Weeks: row.commitsLast4Weeks,
-              commitsThisYear: row.commitsThisYear,
-              avgWeeklyCommits: row.avgWeeklyCommits,
-              contributorsCount: row.contributorsCount,
-              lastCommitAt: row.lastCommitAt,
-              lastReleaseAt: row.lastReleaseAt,
-              lastReleaseTag: row.lastReleaseTag,
-              fetchedAt: row.fetchedAt,
-              source: row.source,
-              error: row.error,
-            }),
-          ),
-        }
-      : undefined;
-
-  const aiSections =
-    aiSectionRows && aiSectionRows.length > 0
-      ? aiSectionRows.reduce<Record<string, AiSectionEntry>>((acc, row: Doc<"ai_sections">) => {
-          acc[row.sectionId] = {
-            sectionId: row.sectionId,
-            content: row.content,
-            model: row.model,
-            tokensUsed: row.tokensUsed ?? undefined,
-            updatedAt: row.updatedAt,
-            sources: row.sources
-              ? row.sources.map((source) => ({
-                  id: source.id,
-                  title: source.title,
-                  url: source.url,
-                  snippet: source.snippet,
-                }))
-              : undefined,
-          };
-          return acc;
-        }, {})
-      : undefined;
-
-  // Build cross-validation info from holders data
-  const crossValidation = holders?.sources || holders?.crossValidationStatus ? {
-    sources: holders.sources,
-    status: holders.crossValidationStatus,
-  } : undefined;
-
-  // Build contract info
-  const contractInfo = contract ? {
-    verified: contract.verified,
-    upgradeable: contract.upgradeable,
-    proxyType: contract.proxyType,
-    implementation: contract.implementation,
-    proxyAdmin: contract.proxyAdmin,
-    owner: contract.owner,
-    roles: contract.roles,
-    pausable: contract.pausable,
-    timelock: contract.timelock,
-    asOfBlock: contract.asOfBlock,
-  } : undefined;
-
-  // Build detailed holders info
-  const holdersDetail = holders ? {
-    totalSupply: holders.totalSupply,
-    freeFloat: holders.freeFloat,
-    topHolders: holders.topHolders,
-    top10Pct: holders.top10Pct,
-    top1Pct: holders.top1Pct,
-    top3Pct: holders.top3Pct,
-    contractSharePct: holders.contractSharePct,
-    eoaSharePct: holders.eoaSharePct,
-    coveragePct: holders.coveragePct,
-    sampleSize: holders.sampleSize,
-    asOfBlock: holders.asOfBlock,
-  } : undefined;
-
-  // Build detailed liquidity info
-  const liquidityDetail = liquidity ? {
-    pools: liquidity.pools,
-    cexSharePct: liquidity.cexSharePct,
-    asOfBlock: liquidity.asOfBlock,
-  } : undefined;
-
-  // Build detailed governance info
-  const governanceDetail = governance ? {
-    framework: governance.framework,
-    quorumPct: governance.quorumPct,
-    turnoutHistory: governance.turnoutHistory,
-  } : undefined;
-
-  // Build audits info
-  const auditsInfo = audits.length > 0 ? audits.map(audit => ({
-    firm: audit.firm,
-    reportUrl: audit.reportUrl,
-    date: audit.date,
-    severitySummary: audit.severitySummary,
-  })) : undefined;
-
   return {
     id,
     name: asset.name ?? asset.symbol ?? asset.address,
@@ -762,29 +592,231 @@ async function buildTokenView(ctx: any, asset: Doc<"assets">): Promise<TokenView
     liquidityUsd,
     holders: holdersCount,
     volume24hUsd,
+    priceUsd: marketData?.priceUsd ?? 0,
+    priceChange24h: marketData?.priceChange24h,
     summary,
     updatedAt,
     tags: buildTags(chainMeta.short, risk, liquidityUsd, governance),
     sparkline: buildSparkline(scoreHistory),
     stats: buildStats(latestScore, scoreHistory[1], liquidityUsd),
-    marketData: marketDataObj,
-    projectProfile: projectProfileInfo,
-    development,
-    aiSections,
-    aiReport: aiReport ? {
-      report: aiReport.report,
-      summary: aiReport.summary,
-      sources: aiReport.sources,
-      updatedAt: aiReport.updatedAt
-    } : undefined,
+    marketData: buildMarketData(marketData),
+    projectProfile: buildProjectProfile(projectProfile),
+    development: buildDevelopmentStats(developmentRows),
+    aiSections: buildAiSections(aiSectionRows),
+    aiReport: buildAiReport(aiReport),
     parsedProjectData: asset.parsedProjectData,
-    crossValidation,
-    contract: contractInfo,
-    holdersDetail,
-    liquidityDetail,
-    governanceDetail,
-    audits: auditsInfo,
+    crossValidation: buildCrossValidation(holders),
+    contract: buildContractInfo(contract),
+    holdersDetail: buildHoldersDetail(holders),
+    liquidityDetail: buildLiquidityDetail(liquidity),
+    governanceDetail: buildGovernanceDetail(governance),
+    audits: buildAuditsInfo(audits),
   };
+}
+
+function buildMarketData(marketData: Doc<"market_data"> | null) {
+  if (!marketData) return undefined;
+
+  const listings =
+    marketData.exchangeListings && marketData.exchangeListings.length > 0
+      ? marketData.exchangeListings.map((listing) => ({
+        exchange: listing.exchange,
+        pair: listing.pair,
+        baseSymbol: listing.baseSymbol,
+        targetSymbol: listing.targetSymbol,
+        priceUsd: listing.priceUsd,
+        volume24hUsd: listing.volume24hUsd,
+        trustScore: listing.trustScore,
+        isDex: listing.isDex,
+        lastTradedAt: listing.lastTradedAt,
+        url: listing.url,
+        source: listing.source,
+        sourceUrl: listing.sourceUrl,
+      }))
+      : undefined;
+
+  const hasLaunchData =
+    Boolean(marketData.launchDate) ||
+    Boolean(marketData.initialMarketCapUsd) ||
+    Boolean(marketData.initialPriceUsd);
+
+  const hasCurrentData =
+    Boolean(marketData.marketCapUsd) ||
+    Boolean(marketData.priceUsd) ||
+    Boolean(marketData.volume24hUsd);
+
+  if (!hasLaunchData && !hasCurrentData && !listings) return undefined;
+
+  return {
+    launch: hasLaunchData
+      ? {
+        date: marketData.launchDate,
+        marketCapUsd: marketData.initialMarketCapUsd,
+        priceUsd: marketData.initialPriceUsd,
+        source: marketData.launchSource,
+        sourceUrl: marketData.launchSourceUrl,
+      }
+      : undefined,
+    current: hasCurrentData
+      ? {
+        marketCapUsd: marketData.marketCapUsd,
+        priceUsd: marketData.priceUsd,
+        volume24hUsd: marketData.volume24hUsd,
+        source: marketData.currentSource,
+        sourceUrl: marketData.currentSourceUrl,
+        updatedAt: marketData.updatedAt,
+      }
+      : undefined,
+    listings,
+  };
+}
+
+function buildProjectProfile(projectProfile: Doc<"project_profiles"> | null) {
+  if (!projectProfile) return undefined;
+  return {
+    githubRepos: projectProfile.githubRepos,
+    website: projectProfile.website,
+    docs: projectProfile.docs,
+    twitter: projectProfile.twitter,
+    discord: projectProfile.discord,
+    telegram: projectProfile.telegram,
+  };
+}
+
+function buildDevelopmentStats(developmentRows: Doc<"development_stats">[]): DevelopmentOverview | undefined {
+  if (!developmentRows || developmentRows.length === 0) return undefined;
+  return {
+    repos: developmentRows.map(
+      (row): DevelopmentRepoStats => ({
+        repo: row.repo,
+        repoUrl: row.repoUrl,
+        owner: row.owner,
+        name: row.name,
+        description: row.description,
+        homepage: row.homepage,
+        license: row.license,
+        stars: row.stars,
+        forks: row.forks,
+        watchers: row.watchers,
+        openIssues: row.openIssues,
+        subscribers: row.subscribers,
+        defaultBranch: row.defaultBranch,
+        primaryLanguage: row.primaryLanguage,
+        topics: row.topics,
+        commitsLast4Weeks: row.commitsLast4Weeks,
+        commitsThisYear: row.commitsThisYear,
+        avgWeeklyCommits: row.avgWeeklyCommits,
+        contributorsCount: row.contributorsCount,
+        lastCommitAt: row.lastCommitAt,
+        lastReleaseAt: row.lastReleaseAt,
+        lastReleaseTag: row.lastReleaseTag,
+        fetchedAt: row.fetchedAt,
+        source: row.source,
+        error: row.error,
+      }),
+    ),
+  };
+}
+
+function buildAiSections(aiSectionRows: Doc<"ai_sections">[]) {
+  if (!aiSectionRows || aiSectionRows.length === 0) return undefined;
+  return aiSectionRows.reduce<Record<string, AiSectionEntry>>((acc, row) => {
+    acc[row.sectionId] = {
+      sectionId: row.sectionId,
+      content: row.content,
+      model: row.model,
+      tokensUsed: row.tokensUsed ?? undefined,
+      updatedAt: row.updatedAt,
+      sources: row.sources
+        ? row.sources.map((source) => ({
+          id: source.id,
+          title: source.title,
+          url: source.url,
+          snippet: source.snippet,
+        }))
+        : undefined,
+    };
+    return acc;
+  }, {});
+}
+
+function buildAiReport(aiReport: Doc<"ai_reports"> | null) {
+  if (!aiReport) return undefined;
+  return {
+    report: aiReport.report,
+    summary: aiReport.summary,
+    sources: aiReport.sources,
+    updatedAt: aiReport.updatedAt,
+  };
+}
+
+function buildCrossValidation(holders: Doc<"holders_snapshot"> | null) {
+  if (!holders?.sources && !holders?.crossValidationStatus) return undefined;
+  return {
+    sources: holders.sources,
+    status: holders.crossValidationStatus,
+  };
+}
+
+function buildContractInfo(contract: Doc<"contracts"> | null) {
+  if (!contract) return undefined;
+  return {
+    verified: contract.verified,
+    upgradeable: contract.upgradeable,
+    proxyType: contract.proxyType,
+    implementation: contract.implementation,
+    proxyAdmin: contract.proxyAdmin,
+    owner: contract.owner,
+    roles: contract.roles,
+    pausable: contract.pausable,
+    timelock: contract.timelock,
+    asOfBlock: contract.asOfBlock,
+  };
+}
+
+function buildHoldersDetail(holders: Doc<"holders_snapshot"> | null) {
+  if (!holders) return undefined;
+  return {
+    totalSupply: holders.totalSupply,
+    freeFloat: holders.freeFloat,
+    topHolders: holders.topHolders,
+    top10Pct: holders.top10Pct,
+    top1Pct: holders.top1Pct,
+    top3Pct: holders.top3Pct,
+    contractSharePct: holders.contractSharePct,
+    eoaSharePct: holders.eoaSharePct,
+    coveragePct: holders.coveragePct,
+    sampleSize: holders.sampleSize,
+    asOfBlock: holders.asOfBlock,
+  };
+}
+
+function buildLiquidityDetail(liquidity: Doc<"liquidity"> | null) {
+  if (!liquidity) return undefined;
+  return {
+    pools: liquidity.pools,
+    cexSharePct: liquidity.cexSharePct,
+    asOfBlock: liquidity.asOfBlock,
+  };
+}
+
+function buildGovernanceDetail(governance: Doc<"governance"> | null) {
+  if (!governance) return undefined;
+  return {
+    framework: governance.framework,
+    quorumPct: governance.quorumPct,
+    turnoutHistory: governance.turnoutHistory,
+  };
+}
+
+function buildAuditsInfo(audits: Doc<"audits">[]) {
+  if (!audits || audits.length === 0) return undefined;
+  return audits.map((audit) => ({
+    firm: audit.firm,
+    reportUrl: audit.reportUrl,
+    date: audit.date,
+    severitySummary: audit.severitySummary,
+  }));
 }
 
 function getChainMeta(chainId: string) {
@@ -952,13 +984,13 @@ function formatUsdCompact(value: number) {
 
 function parseTokenId(tokenId: string) {
   if (!tokenId) return null;
-  
+
   // Check if it's just an address (0x...)
   const isAddressOnly = /^0x[a-fA-F0-9]{40}$/.test(tokenId.trim());
   if (isAddressOnly) {
     return { chainId: null, address: tokenId.trim().toLowerCase() };
   }
-  
+
   // Check if it's CAIP-19 format (eip155:1:erc20:0x...)
   const parts = tokenId.split(":");
   if (parts.length >= 4 && parts[0] === "eip155") {
@@ -966,7 +998,7 @@ function parseTokenId(tokenId: string) {
     const address = parts.slice(3).join(":").toLowerCase();
     return { chainId, address };
   }
-  
+
   return null;
 }
 
@@ -979,7 +1011,7 @@ export const search = query({
     const results: any[] = [];
     if (isAddr) {
       if (chainId) {
-        const rows = await ctx.db.query("assets").withIndex("by_chain_address", q2 => 
+        const rows = await ctx.db.query("assets").withIndex("by_chain_address", q2 =>
           q2.eq("chainId", chainId).eq("address", term)
         ).take(10);
         return rows;
@@ -1220,19 +1252,21 @@ export const ensureAsset = internalMutation({
 });
 
 export const insertContract = internalMutation({
-  args: { assetId: v.id("assets"), data: v.object({
-    address: v.string(),
-    verified: v.boolean(),
-    upgradeable: v.boolean(),
-    proxyType: v.optional(v.string()),
-    implementation: v.optional(v.string()),
-    proxyAdmin: v.optional(v.string()),
-    owner: v.optional(v.string()),
-    roles: v.array(v.object({ name: v.string(), holder: v.string() })),
-    pausable: v.boolean(),
-    timelock: v.optional(v.object({ address: v.string(), delaySec: v.number() })),
-    asOfBlock: v.number(),
-  })},
+  args: {
+    assetId: v.id("assets"), data: v.object({
+      address: v.string(),
+      verified: v.boolean(),
+      upgradeable: v.boolean(),
+      proxyType: v.optional(v.string()),
+      implementation: v.optional(v.string()),
+      proxyAdmin: v.optional(v.string()),
+      owner: v.optional(v.string()),
+      roles: v.array(v.object({ name: v.string(), holder: v.string() })),
+      pausable: v.boolean(),
+      timelock: v.optional(v.object({ address: v.string(), delaySec: v.number() })),
+      asOfBlock: v.number(),
+    })
+  },
   handler: async (ctx, { assetId, data }) => {
     const now = Date.now();
     return await ctx.db.insert("contracts", { assetId, ...data, createdAt: now, updatedAt: now });
@@ -1240,30 +1274,32 @@ export const insertContract = internalMutation({
 });
 
 export const insertHolders = internalMutation({
-  args: { assetId: v.id("assets"), data: v.object({
-    asOfBlock: v.number(),
-    totalSupply: v.string(),
-    freeFloat: v.string(),
-    top10Pct: v.number(),
-    hhi: v.number(),
-    nakamotoCoeff: v.number(),
-    topHolders: v.array(v.object({ address: v.string(), pct: v.number(), label: v.optional(v.string()) })),
-    top1Pct: v.optional(v.number()),
-    top3Pct: v.optional(v.number()),
-    gini: v.optional(v.number()),
-    contractSharePct: v.optional(v.number()),
-    eoaSharePct: v.optional(v.number()),
-    coveragePct: v.optional(v.number()),
-    sampleSize: v.optional(v.number()),
-    source: v.optional(v.string()),
-    sources: v.optional(v.array(v.string())), // Multi-source tracking
-    crossValidationStatus: v.optional(v.string()), // Cross-validation status
-    // Token metadata fields (not stored in holders_snapshot table, just passed through)
-    symbol: v.optional(v.string()),
-    name: v.optional(v.string()),
-    decimals: v.optional(v.number()),
-    iconUrl: v.optional(v.string()),
-  })},
+  args: {
+    assetId: v.id("assets"), data: v.object({
+      asOfBlock: v.number(),
+      totalSupply: v.string(),
+      freeFloat: v.string(),
+      top10Pct: v.number(),
+      hhi: v.number(),
+      nakamotoCoeff: v.number(),
+      topHolders: v.array(v.object({ address: v.string(), pct: v.number(), label: v.optional(v.string()) })),
+      top1Pct: v.optional(v.number()),
+      top3Pct: v.optional(v.number()),
+      gini: v.optional(v.number()),
+      contractSharePct: v.optional(v.number()),
+      eoaSharePct: v.optional(v.number()),
+      coveragePct: v.optional(v.number()),
+      sampleSize: v.optional(v.number()),
+      source: v.optional(v.string()),
+      sources: v.optional(v.array(v.string())), // Multi-source tracking
+      crossValidationStatus: v.optional(v.string()), // Cross-validation status
+      // Token metadata fields (not stored in holders_snapshot table, just passed through)
+      symbol: v.optional(v.string()),
+      name: v.optional(v.string()),
+      decimals: v.optional(v.number()),
+      iconUrl: v.optional(v.string()),
+    })
+  },
   handler: async (ctx, { assetId, data }) => {
     const now = Date.now();
     // Extract metadata fields before inserting (they don't belong in holders_snapshot table)
@@ -1273,11 +1309,13 @@ export const insertHolders = internalMutation({
 });
 
 export const insertLiquidity = internalMutation({
-  args: { assetId: v.id("assets"), data: v.object({
-    asOfBlock: v.number(),
-    pools: v.array(v.object({ dex: v.string(), poolAddress: v.string(), tvlUsd: v.number(), sharePct: v.number() })),
-    cexSharePct: v.optional(v.number()),
-  })},
+  args: {
+    assetId: v.id("assets"), data: v.object({
+      asOfBlock: v.number(),
+      pools: v.array(v.object({ dex: v.string(), poolAddress: v.string(), tvlUsd: v.number(), sharePct: v.number() })),
+      cexSharePct: v.optional(v.number()),
+    })
+  },
   handler: async (ctx, { assetId, data }) => {
     const now = Date.now();
     return await ctx.db.insert("liquidity", { assetId, ...data, createdAt: now });
@@ -1285,11 +1323,13 @@ export const insertLiquidity = internalMutation({
 });
 
 export const upsertGovernance = internalMutation({
-  args: { assetId: v.id("assets"), data: v.object({
-    framework: v.optional(v.string()),
-    quorumPct: v.optional(v.number()),
-    turnoutHistory: v.array(v.object({ proposalId: v.string(), turnoutPct: v.number(), ts: v.number() })),
-  })},
+  args: {
+    assetId: v.id("assets"), data: v.object({
+      framework: v.optional(v.string()),
+      quorumPct: v.optional(v.number()),
+      turnoutHistory: v.array(v.object({ proposalId: v.string(), turnoutPct: v.number(), ts: v.number() })),
+    })
+  },
   handler: async (ctx, { assetId, data }) => {
     const now = Date.now();
     const existing = await ctx.db.query("governance").withIndex("by_asset", q => q.eq("assetId", assetId)).order("desc").take(1);
@@ -1299,11 +1339,13 @@ export const upsertGovernance = internalMutation({
 });
 
 export const upsertChainStats = internalMutation({
-  args: { chainId: v.string(), data: v.object({
-    validators: v.optional(v.number()),
-    topValidatorsPct: v.optional(v.number()),
-    nakamotoCoeff: v.optional(v.number()),
-  })},
+  args: {
+    chainId: v.string(), data: v.object({
+      validators: v.optional(v.number()),
+      topValidatorsPct: v.optional(v.number()),
+      nakamotoCoeff: v.optional(v.number()),
+    })
+  },
   handler: async (ctx, { chainId, data }) => {
     const now = Date.now();
     const existing = await ctx.db.query("chain_stats").withIndex("by_chain", q => q.eq("chainId", chainId)).order("desc").take(1);
@@ -1313,8 +1355,8 @@ export const upsertChainStats = internalMutation({
 });
 
 export const upsertMarketData = internalMutation({
-  args: { 
-    assetId: v.id("assets"), 
+  args: {
+    assetId: v.id("assets"),
     data: v.object({
       launchDate: v.optional(v.number()),
       initialMarketCapUsd: v.optional(v.number()),
@@ -1345,18 +1387,18 @@ export const upsertMarketData = internalMutation({
   handler: async (ctx, { assetId, data }) => {
     const now = Date.now();
     const existing = await ctx.db.query("market_data").withIndex("by_asset", q => q.eq("assetId", assetId)).order("desc").take(1);
-    if (existing[0]) { 
-      await ctx.db.patch(existing[0]._id, { 
-        ...data, 
-        updatedAt: now 
-      }); 
-      return existing[0]._id; 
+    if (existing[0]) {
+      await ctx.db.patch(existing[0]._id, {
+        ...data,
+        updatedAt: now
+      });
+      return existing[0]._id;
     }
-    return await ctx.db.insert("market_data", { 
-      assetId, 
-      ...data, 
-      createdAt: now, 
-      updatedAt: now 
+    return await ctx.db.insert("market_data", {
+      assetId,
+      ...data,
+      createdAt: now,
+      updatedAt: now
     });
   },
 });
@@ -1431,7 +1473,7 @@ export const upsertAiReport = internalMutation({
       .query("ai_reports")
       .withIndex("by_asset", q => q.eq("assetId", assetId))
       .take(1);
-    
+
     if (existing[0]) {
       await ctx.db.patch(existing[0]._id, {
         report,
@@ -1446,7 +1488,7 @@ export const upsertAiReport = internalMutation({
       });
       return existing[0]._id;
     }
-    
+
     return await ctx.db.insert("ai_reports", {
       assetId,
       report,
@@ -1566,28 +1608,30 @@ export const insertAudit = internalMutation({
 });
 
 export const insertScore = internalMutation({
-  args: { assetId: v.id("assets"), asOfBlock: v.number(), subScores: v.object({
-    ownership: v.number(),
-    controlRisk: v.number(),
-    liquidity: v.number(),
-    governance: v.number(),
-    chainLevel: v.number(),
-    codeAssurance: v.number(),
-  }), total: v.number(), weights: v.optional(v.object({
-    ownership: v.number(),
-    controlRisk: v.number(),
-    liquidity: v.number(),
-    governance: v.number(),
-    chainLevel: v.number(),
-    codeAssurance: v.number(),
-  })), confidence: v.optional(v.object({
-    ownership: v.number(),
-    controlRisk: v.number(),
-    liquidity: v.number(),
-    governance: v.number(),
-    chainLevel: v.number(),
-    codeAssurance: v.number(),
-  })) },
+  args: {
+    assetId: v.id("assets"), asOfBlock: v.number(), subScores: v.object({
+      ownership: v.number(),
+      controlRisk: v.number(),
+      liquidity: v.number(),
+      governance: v.number(),
+      chainLevel: v.number(),
+      codeAssurance: v.number(),
+    }), total: v.number(), weights: v.optional(v.object({
+      ownership: v.number(),
+      controlRisk: v.number(),
+      liquidity: v.number(),
+      governance: v.number(),
+      chainLevel: v.number(),
+      codeAssurance: v.number(),
+    })), confidence: v.optional(v.object({
+      ownership: v.number(),
+      controlRisk: v.number(),
+      liquidity: v.number(),
+      governance: v.number(),
+      chainLevel: v.number(),
+      codeAssurance: v.number(),
+    }))
+  },
   handler: async (ctx, { assetId, asOfBlock, subScores, total, weights, confidence }) => {
     const now = Date.now();
     const storedWeights = weights ?? { ...SCORE_WEIGHTS };
@@ -1660,21 +1704,21 @@ export const getExistingByChainAddress = internalQuery({
   },
   handler: async (ctx, { chainAddresses }) => {
     const results: Array<{ chainId: string; address: string }> = [];
-    
+
     for (const { chainId, address } of chainAddresses) {
       const normalizedAddress = address.toLowerCase();
       const asset = await ctx.db
         .query("assets")
-        .withIndex("by_chain_address", q => 
+        .withIndex("by_chain_address", q =>
           q.eq("chainId", chainId).eq("address", normalizedAddress)
         )
         .unique();
-      
+
       if (asset) {
         results.push({ chainId, address: normalizedAddress });
       }
     }
-    
+
     return results;
   },
 });
@@ -1683,7 +1727,7 @@ export const getUnsyncedAssets = internalQuery({
   handler: async (ctx) => {
     return await ctx.db
       .query("assets")
-      .filter((q) => 
+      .filter((q) =>
         q.and(
           q.eq(q.field("status"), "active"),
           q.neq(q.field("iconStorageId"), undefined),

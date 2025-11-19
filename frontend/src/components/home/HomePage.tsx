@@ -5,10 +5,10 @@ import HeroSection from "./HeroSection";
 import OverviewCards from "./OverviewCards";
 import FilterBar, { FilterState } from "./FilterBar";
 import TokenTable from "./TokenTable";
+import TokenTableSkeleton from "./TokenTableSkeleton";
 import { TokenRecord } from "@/types/token";
 import { ScoreLookupResult, fetchTokens, TokenListResponse } from "@/lib/api";
 
-const PAGE_SIZE = 5;
 
 export default function HomePage() {
   const [filters, setFilters] = useState<FilterState>({
@@ -21,6 +21,7 @@ export default function HomePage() {
     view: "table",
   });
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
   const [lastLookup, setLastLookup] = useState<ScoreLookupResult | null>(null);
   const [data, setData] = useState<TokenListResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -39,7 +40,7 @@ export default function HomePage() {
           sort: filters.sort,
           sortDir: filters.sortDir,
           page,
-          pageSize: PAGE_SIZE,
+          pageSize,
         });
         setData(response);
       } catch (err) {
@@ -51,7 +52,7 @@ export default function HomePage() {
     };
 
     loadTokens();
-  }, [filters, page]);
+  }, [filters, page, pageSize]);
 
   const handleFiltersChange = (nextFilters: FilterState) => {
     setFilters(nextFilters);
@@ -64,13 +65,18 @@ export default function HomePage() {
     }
   };
 
+  const handlePageSizeChange = (newPageSize: number) => {
+    setPageSize(newPageSize);
+    setPage(1); // Reset to page 1 when changing page size
+  };
+
   const handleLookupSuccess = (result: ScoreLookupResult) => {
     setLastLookup(result);
   };
 
   const handleExport = () => {
     if (!data?.items) return;
-    
+
     const header = [
       "Name",
       "Symbol",
@@ -115,7 +121,12 @@ export default function HomePage() {
     <div className="min-h-screen w-full pb-16 pt-10 text-[color:var(--color-text-primary)]">
       <main className="mx-auto flex w-full max-w-7xl flex-col gap-10 px-4 sm:px-8 lg:px-12">
         <HeroSection onLookupSuccess={handleLookupSuccess} lastLookup={lastLookup} />
-        <OverviewCards tokens={allTokensForOverview} lastLookup={lastLookup} />
+        <OverviewCards
+          tokens={allTokensForOverview}
+          lastLookup={lastLookup}
+          summary={data?.summary}
+          totalItems={totalItems}
+        />
         <section className="space-y-4 rounded-[28px] border border-white/5 bg-[color:var(--color-bg-card)] p-2 sm:p-4 lg:p-6">
           <FilterBar
             filters={filters}
@@ -124,9 +135,7 @@ export default function HomePage() {
             total={totalItems}
           />
           {loading ? (
-            <div className="flex items-center justify-center py-16">
-              <div className="text-sm text-[color:var(--color-text-secondary)]">Loading tokens...</div>
-            </div>
+            <TokenTableSkeleton />
           ) : error ? (
             <div className="flex items-center justify-center py-16">
               <div className="text-sm text-[#ff8a5c]">{error}</div>
@@ -137,8 +146,9 @@ export default function HomePage() {
               page={page}
               totalPages={totalPages}
               totalItems={totalItems}
-              pageSize={PAGE_SIZE}
+              pageSize={pageSize}
               onPageChange={handlePageChange}
+              onPageSizeChange={handlePageSizeChange}
               view={filters.view}
               sort={filters.sort}
               sortDir={filters.sortDir}

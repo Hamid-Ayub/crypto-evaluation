@@ -65,6 +65,26 @@ export const discoverTokensFromCoinGecko = internalAction({
 
     const { chainId, platformId } = platformInfo;
 
+    // Check rate limit before starting discovery
+    // Discovery makes 1 markets call + up to ~limit detail calls
+    // Conservative estimate: limit + 1
+    const estimatedCalls = limit + 1;
+    const rateLimitCheck = await ctx.runMutation(internal.rateLimit.checkAndIncrement, {
+      key: "coingecko",
+      increment: estimatedCalls,
+    });
+
+    if (!rateLimitCheck.ok) {
+      console.log(`CoinGecko rate limit hit during discovery for ${chain}. Skipping.`);
+      return {
+        success: false,
+        chain,
+        discovered: 0,
+        tokens: [],
+        error: "rate-limit-exceeded",
+      };
+    }
+
     try {
       // Step 1: Fetch top tokens by market cap from CoinGecko
       // Note: /coins/markets doesn't include platform addresses, so we'll fetch a smaller set
@@ -84,7 +104,7 @@ export const discoverTokensFromCoinGecko = internalAction({
       }
 
       const response = await fetch(`${url}?${params.toString()}`);
-      
+
       if (!response.ok) {
         if (response.status === 429) {
           throw new Error("coingecko-rate-limit");
@@ -122,7 +142,7 @@ export const discoverTokensFromCoinGecko = internalAction({
           }
 
           const detailResponse = await fetch(`${detailUrl}?${detailParams.toString()}`);
-          
+
           if (!detailResponse.ok) {
             // Skip if rate limited or not found
             if (detailResponse.status === 429) {
@@ -133,7 +153,7 @@ export const discoverTokensFromCoinGecko = internalAction({
 
           const coinDetail: CoinGeckoCoinDetail = await detailResponse.json();
           const address = coinDetail.platforms?.[platformId];
-          
+
           if (!address) continue; // Token not on this chain
 
           // Normalize address (CoinGecko sometimes returns checksummed)

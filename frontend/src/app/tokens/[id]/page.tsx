@@ -7,6 +7,8 @@ import RefreshButton from "@/components/tokens/RefreshButton";
 import { fetchToken, formatUsd } from "@/lib/api";
 import ResearchDashboard from "@/components/reports/ResearchDashboard";
 import ReportAppendices from "@/components/reports/ReportAppendices";
+import ErrorBoundary from "@/components/shared/ErrorBoundary";
+import MarketStatsTopbar from "@/components/tokens/MarketStatsTopbar";
 // import ExecutiveSummary from "@/components/reports/ExecutiveSummary";
 // import ProjectOverview from "@/components/reports/ProjectOverview";
 // import TokenFundamentals from "@/components/reports/TokenFundamentals";
@@ -45,6 +47,13 @@ function formatAddress(address: string): string {
   return `${address.slice(0, 6)}...${address.slice(-4)}`;
 }
 
+// Helper to get score color
+function getScoreColor(score: number): string {
+  if (score >= 80) return "text-[#3fe081]"; // Green
+  if (score >= 50) return "text-[#f7c548]"; // Yellow
+  return "text-[#ff8a5c]"; // Orange/Red
+}
+
 export default async function TokenDetailPage({ params }: PageProps) {
   const { id } = await params;
   const decodedId = decodeURIComponent(id);
@@ -79,8 +88,18 @@ export default async function TokenDetailPage({ params }: PageProps) {
 
 
   return (
-    <div className="min-h-screen w-full bg-gradient-to-b from-black via-[#0a0a0f] to-black pb-16 pt-10 text-[color:var(--color-text-primary)]">
-      <main className="mx-auto flex w-full max-w-7xl flex-col gap-8 px-4 sm:px-8 lg:px-12">
+    <div className="min-h-screen w-full bg-gradient-to-b from-black via-[#0a0a0f] to-black pb-16 text-[color:var(--color-text-primary)]">
+      {/* Sticky Market Stats Topbar */}
+      <MarketStatsTopbar
+        tokenId={decodedId}
+        symbol={token.symbol}
+        price={token.priceUsd}
+        priceChange24h={token.priceChange24h}
+        volume24h={token.volume24hUsd}
+        marketCap={token.marketCapUsd}
+      />
+
+      <main className="mx-auto flex w-full max-w-7xl flex-col gap-8 px-4 pt-24 sm:px-8 lg:px-12">
         {/* Hero Section */}
         <header className="relative overflow-hidden rounded-[36px] border border-white/10 bg-gradient-to-br from-[color:var(--color-bg-card)] via-[#070a11] to-[color:var(--color-bg-card-alt)] p-6 sm:p-8 shadow-2xl">
           <div className="absolute inset-0 opacity-60 [background-image:radial-gradient(circle_at_10%_20%,rgba(143,227,255,0.45),transparent_45%),radial-gradient(circle_at_80%_20%,rgba(63,224,129,0.35),transparent_40%)] blur-3xl" />
@@ -95,7 +114,7 @@ export default async function TokenDetailPage({ params }: PageProps) {
               </Link>
               <div className="flex items-center gap-3">
                 <span className="text-xs text-white/40">Updated {token.updatedAt}</span>
-                <RefreshButton chainId={token.chain} address={token.address} />
+                <RefreshButton chainId={token.chain} address={token.address} tokenId={decodedId} assetId={token.id} />
               </div>
             </div>
 
@@ -191,19 +210,19 @@ export default async function TokenDetailPage({ params }: PageProps) {
                   <div className="grid grid-cols-2 gap-3">
                     <div className="text-center rounded-lg bg-white/5 p-3">
                       <p className="text-[10px] uppercase tracking-widest text-white/40 mb-1">Ownership</p>
-                      <p className="text-base font-semibold text-[#3fe081]">{token.benchmarkDetails.ownership.toFixed(0)}/100</p>
+                      <p className={`text-base font-semibold ${getScoreColor(token.benchmarkDetails.ownership)}`}>{token.benchmarkDetails.ownership.toFixed(0)}/100</p>
                     </div>
                     <div className="text-center rounded-lg bg-white/5 p-3">
                       <p className="text-[10px] uppercase tracking-widest text-white/40 mb-1">Governance</p>
-                      <p className="text-base font-semibold text-[#8ee3ff]">{token.benchmarkDetails.governance.toFixed(0)}/100</p>
+                      <p className={`text-base font-semibold ${getScoreColor(token.benchmarkDetails.governance)}`}>{token.benchmarkDetails.governance.toFixed(0)}/100</p>
                     </div>
                     <div className="text-center rounded-lg bg-white/5 p-3">
                       <p className="text-[10px] uppercase tracking-widest text-white/40 mb-1">Liquidity</p>
-                      <p className="text-base font-semibold text-[#f7c548]">{token.benchmarkDetails.liquidity.toFixed(0)}/100</p>
+                      <p className={`text-base font-semibold ${getScoreColor(token.benchmarkDetails.liquidity)}`}>{token.benchmarkDetails.liquidity.toFixed(0)}/100</p>
                     </div>
                     <div className="text-center rounded-lg bg-white/5 p-3">
                       <p className="text-[10px] uppercase tracking-widest text-white/40 mb-1">Control Risk</p>
-                      <p className="text-base font-semibold text-[#ff8a5c]">{token.benchmarkDetails.controlRisk.toFixed(0)}/100</p>
+                      <p className={`text-base font-semibold ${getScoreColor(token.benchmarkDetails.controlRisk)}`}>{token.benchmarkDetails.controlRisk.toFixed(0)}/100</p>
                     </div>
                   </div>
                 </div>
@@ -235,10 +254,11 @@ export default async function TokenDetailPage({ params }: PageProps) {
                 color: "text-[#f7c548]",
               },
               {
-                label: "Risk Level",
+                label: "Score Risk",
                 value: riskMeta.label,
                 icon: riskMeta.label === "Low Risk" ? Shield : riskMeta.label === "Medium Risk" ? AlertTriangle : AlertTriangle,
                 color: riskMeta.label === "Low Risk" ? "text-[#3fe081]" : riskMeta.label === "Medium Risk" ? "text-[#f7c548]" : "text-[#ff8a5c]",
+                tooltip: "Based on quantitative benchmark score",
               },
             ].map((metric, index) => {
               const IconComponent = metric.icon;
@@ -247,7 +267,7 @@ export default async function TokenDetailPage({ params }: PageProps) {
                   <div className="flex items-center justify-center mb-2">
                     <IconComponent className={`h-6 w-6 ${metric.color}`} />
                   </div>
-                  <p className="text-xs uppercase tracking-widest text-white/40 mb-1">{metric.label}</p>
+                  <p className="text-xs uppercase tracking-widest text-white/40 mb-1" title={(metric as any).tooltip}>{metric.label}</p>
                   <p className={`text-lg font-bold ${metric.color}`}>{metric.value}</p>
                 </div>
               );
@@ -258,7 +278,9 @@ export default async function TokenDetailPage({ params }: PageProps) {
         <div id="full-report" className="sr-only" aria-hidden="true" />
 
         {/* Comprehensive Token Analysis Report */}
-        <ResearchDashboard token={token} />
+        <ErrorBoundary label="AI Research Report Unavailable">
+          <ResearchDashboard token={token} />
+        </ErrorBoundary>
         {/* 
         <ExecutiveSummary token={token} />
         <ProjectOverview token={token} parsedProjectData={token.parsedProjectData} />

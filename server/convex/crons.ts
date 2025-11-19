@@ -17,7 +17,7 @@ crons.cron(
 
 crons.cron(
   "sync-assets-to-github",
-  "*/15 * * * *",  // Every 15 minutes
+  "30 * * * *",  // Every hour at minute 30
   internal.assetDownload.syncAssetsToGitHub
 );
 
@@ -54,11 +54,6 @@ crons.cron(
   internal.schedulerActions.discoverOptimism
 );
 
-crons.cron(
-  "generate-ai-sections",
-  "0 3 * * *",  // Daily at 03:00 UTC
-  internal.aiContent.generateFeaturedSections
-);
 
 export default crons;
 
