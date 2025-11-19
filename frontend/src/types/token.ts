@@ -83,6 +83,29 @@ export type AiSectionEntry = {
   sources?: AiSectionSource[];
 };
 
+export type AiReportStructure = {
+  executive_summary: {
+    verdict: "Bullish" | "Bearish" | "Neutral" | "High Risk";
+    one_liner: string;
+    key_strengths: string[];
+    key_weaknesses: string[];
+  };
+  decentralization_analysis: {
+    owner_influence: string;
+    governance_health: string;
+    centralization_vectors: string[];
+  };
+  market_intelligence: {
+    catalysts: string[];
+    competitor_comparison: string;
+    liquidity_commentary: string;
+  };
+  security_audit: {
+    contract_risks: string[];
+    audit_coverage: string;
+  };
+};
+
 export type TokenRecord = {
   id: string;
   name: string;
@@ -126,6 +149,12 @@ export type TokenRecord = {
   projectProfile?: ProjectProfile;
   development?: DevelopmentOverview;
   aiSections?: Record<string, AiSectionEntry>;
+  aiReport?: {
+    report: AiReportStructure;
+    summary?: string;
+    sources?: AiSectionSource[];
+    updatedAt: number;
+  };
   parsedProjectData?: {
     foundingTeam?: any;
     roadmap?: any;

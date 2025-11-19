@@ -64,6 +64,12 @@ export type TokenView = {
   development?: DevelopmentOverview;
   aiSections?: Record<string, AiSectionEntry>;
   parsedProjectData?: any; // Parsed structured data from project websites
+  aiReport?: {
+    report: any;
+    summary?: string;
+    sources?: Array<{ id: number; title?: string; url: string; snippet?: string }>;
+    updatedAt: number;
+  };
   // Cross-validation info
   crossValidation?: {
     sources?: string[];
@@ -462,6 +468,7 @@ async function buildTokenView(ctx: any, asset: Doc<"assets">): Promise<TokenView
     projectProfileRows,
     developmentRows,
     aiSectionRows,
+    aiReportRows,
   ] = await Promise.all([
     ctx.db
       .query("scores")
@@ -511,6 +518,10 @@ async function buildTokenView(ctx: any, asset: Doc<"assets">): Promise<TokenView
       .query("ai_sections")
       .withIndex("by_asset_section", (q2: any) => q2.eq("assetId", asset._id))
       .collect(),
+    ctx.db
+      .query("ai_reports")
+      .withIndex("by_asset", (q2: any) => q2.eq("assetId", asset._id))
+      .take(1),
   ]);
 
   const latestScore = scoreHistory[0] ?? null;
@@ -523,6 +534,7 @@ async function buildTokenView(ctx: any, asset: Doc<"assets">): Promise<TokenView
   const contract = contractRows[0] ?? null;
   const audits = auditRows ?? [];
   const projectProfile = projectProfileRows[0] ?? null;
+  const aiReport = aiReportRows[0] ?? null;
 
   const chainMeta = getChainMeta(asset.chainId);
   const category = inferCategory(asset, chainMeta.defaultCategory);
@@ -759,6 +771,12 @@ async function buildTokenView(ctx: any, asset: Doc<"assets">): Promise<TokenView
     projectProfile: projectProfileInfo,
     development,
     aiSections,
+    aiReport: aiReport ? {
+      report: aiReport.report,
+      summary: aiReport.summary,
+      sources: aiReport.sources,
+      updatedAt: aiReport.updatedAt
+    } : undefined,
     parsedProjectData: asset.parsedProjectData,
     crossValidation,
     contract: contractInfo,
@@ -1383,6 +1401,76 @@ export const upsertAiSection = internalMutation({
       createdAt: now,
       updatedAt: now,
     });
+  },
+});
+
+export const upsertAiReport = internalMutation({
+  args: {
+    assetId: v.id("assets"),
+    report: v.any(),
+    summary: v.optional(v.string()),
+    model: v.string(),
+    promptHash: v.string(),
+    tokensUsed: v.optional(v.number()),
+    latencyMs: v.optional(v.number()),
+    sourceDataHash: v.optional(v.string()),
+    sources: v.optional(
+      v.array(
+        v.object({
+          id: v.number(),
+          title: v.optional(v.string()),
+          url: v.string(),
+          snippet: v.optional(v.string()),
+        }),
+      ),
+    ),
+  },
+  handler: async (ctx, { assetId, report, summary, model, promptHash, tokensUsed, latencyMs, sourceDataHash, sources }) => {
+    const now = Date.now();
+    const existing = await ctx.db
+      .query("ai_reports")
+      .withIndex("by_asset", q => q.eq("assetId", assetId))
+      .take(1);
+    
+    if (existing[0]) {
+      await ctx.db.patch(existing[0]._id, {
+        report,
+        summary,
+        model,
+        promptHash,
+        tokensUsed,
+        latencyMs,
+        sourceDataHash,
+        sources,
+        updatedAt: now
+      });
+      return existing[0]._id;
+    }
+    
+    return await ctx.db.insert("ai_reports", {
+      assetId,
+      report,
+      summary,
+      model,
+      promptHash,
+      tokensUsed,
+      latencyMs,
+      sourceDataHash,
+      sources,
+      createdAt: now,
+      updatedAt: now,
+    });
+  },
+});
+
+export const getAiReport = query({
+  args: { assetId: v.id("assets") },
+  handler: async (ctx, { assetId }) => {
+    const rows = await ctx.db
+      .query("ai_reports")
+      .withIndex("by_asset", q => q.eq("assetId", assetId))
+      .take(1);
+    return rows[0] ?? null;
   },
 });
 

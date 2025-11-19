@@ -85,3 +85,5 @@ export function summarizeGovernance(discovery: GovernanceDiscovery): GovernanceI
   return { framework, quorumPct, turnoutHistory };
 }
 
+
+

@@ -3,6 +3,7 @@ import { action } from "./_generated/server";
 import { api, internal } from "./_generated/api";
 import { ProviderAdapter } from "./providers/types";
 import { lookupProjectMetadata } from "./projectMetadata";
+import { caip19 } from "./_internal/normalize";
 
 async function loadComposite(): Promise<ProviderAdapter> {
   const mod = await import("./providers/composite");
@@ -55,6 +56,9 @@ export const ingestAssetSnapshot = action({
     const adapter = await loadComposite();
     const { chainId, address } = args;
 
+    // Check if asset already exists to avoid re-downloading icon if not needed
+    const existingAsset = await ctx.runQuery(api.assets.getByChainAddress, { chainId, address });
+
     const [c, h, l, g, cs, au] = await Promise.all([
       settle(adapter.getContractInfo!(chainId, address)),
       settle(adapter.getHoldersSnapshot!(chainId, address)),
@@ -94,10 +98,10 @@ export const ingestAssetSnapshot = action({
     };
 
     // Download and store asset icon in Convex file storage immediately
-    let iconStorageId: string | undefined;
+    let iconStorageId: string | undefined = existingAsset?.iconStorageId;
     let convexIconUrl: string | undefined;
     
-    if (metadata.iconUrl || metadata.symbol) {
+    if (!iconStorageId && (metadata.iconUrl || metadata.symbol)) {
       const assetResult = await ctx.runAction(internal.assetDownload.downloadAndStoreAsset, {
         chainId,
         address,
@@ -261,6 +265,12 @@ export const ingestAssetSnapshot = action({
 
     const asOfBlock = Math.max(c.ok ? c.v.asOfBlock : 0, h.ok ? h.v.asOfBlock : 0, l.ok ? l.v.asOfBlock : 0);
     const result = await ctx.runAction(internal.compute.computeAndStore, { assetId, asOfBlock });
+
+    // Trigger AI Research (Background Job)
+    // We schedule this to run immediately after ingestion but asynchronously
+    const tokenId = caip19(chainId, args.standard ?? "erc20", address);
+    await ctx.scheduler.runAfter(0, internal.ai.research.generateFullReport, { tokenId, force: true });
+
     return { assetId, scoreId: result.scoreId, jsonldStorageId: result.jsonldStorageId, jsonldUrl: result.url };
   },
 });

@@ -16,3 +16,5 @@ export function loadChainStats(chainId: string | number): ChainStats {
   return CHAIN_STATS[numeric] ?? DEFAULT_CHAIN_STATS;
 }
 
+
+

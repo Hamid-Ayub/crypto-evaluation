@@ -209,6 +209,29 @@ export default defineSchema({
     .index("by_asset_section", ["assetId", "sectionId"])
     .index("by_section", ["sectionId"]),
 
+  ai_reports: defineTable({
+    assetId: v.id("assets"),
+    report: v.any(), // Structured JSON report
+    summary: v.optional(v.string()),
+    model: v.string(),
+    promptHash: v.string(),
+    tokensUsed: v.optional(v.number()),
+    latencyMs: v.optional(v.number()),
+    sourceDataHash: v.optional(v.string()),
+    sources: v.optional(
+      v.array(
+        v.object({
+          id: v.number(),
+          title: v.optional(v.string()),
+          url: v.string(),
+          snippet: v.optional(v.string()),
+        }),
+      ),
+    ),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_asset", ["assetId"]),
+
   ai_section_logs: defineTable({
     assetId: v.id("assets"),
     sectionId: v.string(),
